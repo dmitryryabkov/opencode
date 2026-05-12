@@ -13,45 +13,52 @@ const money = new Intl.NumberFormat("en-US", {
 function View(props: { api: TuiPluginApi; session_id: string }) {
   const theme = () => props.api.theme.current
   const msg = createMemo(() => props.api.state.session.messages(props.session_id))
-  const session = createMemo(() => props.api.state.session.get(props.session_id))
-  const cost = createMemo(() => session()?.cost ?? 0)
+  const cost = createMemo(() => msg().reduce((sum, item) => sum + (item.role === "assistant" ? item.cost : 0), 0))
+  const last = createMemo(() =>
+    msg().findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0),
+  )
+  const tokenTotal = (message: AssistantMessage) =>
+    message.tokens.input +
+    message.tokens.output +
+    message.tokens.reasoning +
+    message.tokens.cache.read +
+    message.tokens.cache.write
+  const isCompaction = (message: AssistantMessage) => message.mode === "compaction" || message.summary === true
+  const sessionTokens = (sessionID: string) => {
+    const message = props.api.state.session
+      .messages(sessionID)
+      .findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
+    const compacted = props.api.state.session.compactionTokens(sessionID)
+    return (
+      (message ? tokenTotal(message) : 0) - (message && isCompaction(message) ? tokenTotal(message) : 0) + compacted
+    )
+  }
 
   const state = createMemo(() => {
-    const last = msg().findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
-    if (!last) {
+    const message = last()
+    if (!message) {
       return {
         tokens: 0,
         percent: null,
       }
     }
 
-    const tokens =
-      last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
-    const model = props.api.state.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
+    const tokens = tokenTotal(message)
+    const model = props.api.state.provider.find((item) => item.id === message.providerID)?.models[message.modelID]
     return {
       tokens,
       percent: model?.limit.context ? Math.round((tokens / model.limit.context) * 100) : null,
     }
   })
 
-const totalTokens = createMemo(() => {
-    const childSessions = props.api.state.session.sessions().filter((s) => s.parentID === props.session_id)
-    const childTokens = childSessions.reduce((sum: number, child) => {
-      const childMessages = props.api.state.session.messages(child.id)
-      const assistantMessages = childMessages.filter(
-        (m) => m.role === "assistant" && !(m.mode === "compaction" || m.summary === true),
-      )
-      if (assistantMessages.length === 0) return sum
-      const lastAssistant = assistantMessages.at(-1) as typeof assistantMessages[number] & { tokens: NonNullable<AssistantMessage["tokens"]> }
-      if (lastAssistant) {
-        sum += lastAssistant.tokens.input + lastAssistant.tokens.output + lastAssistant.tokens.reasoning + lastAssistant.tokens.cache.read + lastAssistant.tokens.cache.write
-      }
-      return sum
-    }, 0)
+  const totalTokens = createMemo(() => {
+    const childTokens = props.api.state.session
+      .sessions()
+      .filter((session) => session.parentID === props.session_id)
+      .reduce((sum, child) => sum + sessionTokens(child.id), 0)
 
-    const compactedTokens = 0
-
-    return state().tokens + childTokens + compactedTokens  })
+    return sessionTokens(props.session_id) + childTokens
+  })
 
   return (
     <box flexDirection="column" gap={1}>

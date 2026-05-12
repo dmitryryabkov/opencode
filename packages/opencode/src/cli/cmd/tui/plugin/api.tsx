@@ -162,6 +162,12 @@ function stateApi(sync: ReturnType<typeof useSync>): TuiPluginApi["state"] {
       sessions() {
         return sync.data.session
       },
+      compactionTokens(sessionID) {
+        return Object.values(sync.data.session_compaction_tokens[sessionID] ?? {}).reduce(
+          (sum, tokens) => sum + tokens,
+          0,
+        )
+      },
       messages(sessionID) {
         return sync.data.message[sessionID] ?? []
       },

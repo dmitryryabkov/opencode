@@ -34,6 +34,40 @@ import path from "path"
 import { useKV } from "./kv"
 import { aggregateFailures } from "./aggregate-failures"
 
+const tokenTotal = (message: Message) => {
+  if (message.role !== "assistant") return 0
+  return (
+    message.tokens.input +
+    message.tokens.output +
+    message.tokens.reasoning +
+    message.tokens.cache.read +
+    message.tokens.cache.write
+  )
+}
+
+const isCompaction = (message: Message) => {
+  if (message.role !== "assistant") return false
+  return message.mode === "compaction" || message.summary === true
+}
+
+const lastContextBeforeCompaction = (messages: Message[], compaction: Message) => {
+  if (compaction.role !== "assistant") return 0
+  const index = messages.findIndex((message) => message.id === compaction.parentID)
+  const last = messages
+    .slice(0, index < 0 ? messages.length : index)
+    .findLast((message) => message.role === "assistant" && tokenTotal(message) > 0)
+  return last ? tokenTotal(last) : 0
+}
+
+const compactionTokens = (messages: Message[]) => {
+  // Preserve the context total the sidebar showed before compaction, plus the compaction request itself.
+  return Object.fromEntries(
+    messages
+      .filter((message) => isCompaction(message) && tokenTotal(message) > 0)
+      .map((message) => [message.id, tokenTotal(message) + lastContextBeforeCompaction(messages, message)]),
+  )
+}
+
 export const { use: useSync, provider: SyncProvider } = createSimpleContext({
   name: "Sync",
   init: () => {
@@ -59,6 +93,9 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       }
       session_diff: {
         [sessionID: string]: Snapshot.FileDiff[]
+      }
+      session_compaction_tokens: {
+        [sessionID: string]: Record<string, number>
       }
       todo: {
         [sessionID: string]: Todo[]
@@ -97,6 +134,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       session: [],
       session_status: {},
       session_diff: {},
+      session_compaction_tokens: {},
       todo: {},
       message: {},
       part: {},
@@ -252,6 +290,13 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
 
         case "message.updated": {
           const messages = store.message[event.properties.info.sessionID]
+          if (isCompaction(event.properties.info) && tokenTotal(event.properties.info) > 0) {
+            setStore("session_compaction_tokens", event.properties.info.sessionID, {
+              ...store.session_compaction_tokens[event.properties.info.sessionID],
+              [event.properties.info.id]:
+                tokenTotal(event.properties.info) + lastContextBeforeCompaction(messages ?? [], event.properties.info),
+            })
+          }
           if (!messages) {
             setStore("message", event.properties.info.sessionID, [event.properties.info])
             break
@@ -291,6 +336,16 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         }
         case "message.removed": {
           const messages = store.message[event.properties.sessionID]
+          const compaction = store.session_compaction_tokens[event.properties.sessionID]
+          if (compaction) {
+            setStore(
+              "session_compaction_tokens",
+              event.properties.sessionID,
+              produce((draft) => {
+                delete draft[event.properties.messageID]
+              }),
+            )
+          }
           const result = Binary.search(messages, event.properties.messageID, (m) => m.id)
           if (result.found) {
             setStore(
@@ -520,9 +575,10 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         },
         async sync(sessionID: string) {
           if (fullSyncedSessions.has(sessionID)) return
-          const [session, messages, todo, diff] = await Promise.all([
+          const [session, messages, allMessages, todo, diff] = await Promise.all([
             sdk.client.session.get({ sessionID }, { throwOnError: true }),
             sdk.client.session.messages({ sessionID, limit: 100 }),
+            sdk.client.session.messages({ sessionID }),
             sdk.client.session.todo({ sessionID }),
             sdk.client.session.diff({ sessionID }),
           ])
@@ -538,6 +594,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
                 draft.part[message.info.id] = message.parts
               }
               draft.message[sessionID] = infos
+              draft.session_compaction_tokens[sessionID] = compactionTokens((allMessages.data ?? []).map((x) => x.info))
               draft.session_diff[sessionID] = diff.data ?? []
             }),
           )

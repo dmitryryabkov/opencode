@@ -311,6 +311,7 @@ export function createTuiPluginApi(opts: Opts = {}): HostPluginApi {
         count: opts.state?.session?.count ?? (() => 0),
         get: opts.state?.session?.get ?? (() => undefined),
         sessions: opts.state?.session?.sessions ?? (() => []),
+        compactionTokens: opts.state?.session?.compactionTokens ?? (() => 0),
         diff: opts.state?.session?.diff ?? (() => []),
         todo: opts.state?.session?.todo ?? (() => []),
         messages: opts.state?.session?.messages ?? (() => []),
