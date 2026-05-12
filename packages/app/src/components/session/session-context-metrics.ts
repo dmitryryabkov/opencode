@@ -1,4 +1,4 @@
-import type { AssistantMessage, Message } from "@opencode-ai/sdk/v2/client"
+import type { AssistantMessage, Message, Session } from "@opencode-ai/sdk/v2/client"
 
 type Provider = {
   id: string
@@ -32,6 +32,16 @@ type Context = {
 type Metrics = {
   totalCost: number
   context: Context | undefined
+  subagents: {
+    sessionID: string
+    title: string
+    agent?: string
+    tokens: number
+    executionMs: number
+  }[]
+  subagentTokens: number
+  totalTokens: number
+  totalExecutionMs: number
 }
 
 const tokenTotal = (msg: AssistantMessage) => {
@@ -47,10 +57,47 @@ const lastAssistantWithTokens = (messages: Message[]) => {
   }
 }
 
-const build = (messages: Message[] = [], providers: Provider[] = []): Metrics => {
+const assistantExecutionMs = (messages: Message[]) => {
+  return messages.reduce((sum, msg) => {
+    if (msg.role !== "assistant") return sum
+    if (msg.summary) return sum
+    if (msg.mode === "compaction") return sum
+    if (typeof msg.time.completed !== "number") return sum
+    return sum + Math.max(0, msg.time.completed - msg.time.created)
+  }, 0)
+}
+
+const childTokens = (input: { sessionID?: string; sessions?: Session[]; messages?: Record<string, Message[] | undefined> }) => {
+  if (!input.sessionID) return []
+  return [...new Map((input.sessions ?? []).map((session) => [session.id, session])).values()]
+    .filter((session) => session.parentID === input.sessionID)
+    .map((session) => {
+      const messages = input.messages?.[session.id] ?? []
+      return {
+        sessionID: session.id,
+        title: session.title,
+        agent: session.agent,
+        tokens: tokenTotal(lastAssistantWithTokens(messages) ?? emptyAssistant),
+        executionMs: assistantExecutionMs(messages),
+      }
+    })
+}
+
+const emptyAssistant = {
+  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+} as AssistantMessage
+
+const build = (
+  messages: Message[] = [],
+  providers: Provider[] = [],
+  children?: { sessionID?: string; sessions?: Session[]; messages?: Record<string, Message[] | undefined> },
+): Metrics => {
   const totalCost = messages.reduce((sum, msg) => sum + (msg.role === "assistant" ? msg.cost : 0), 0)
   const message = lastAssistantWithTokens(messages)
-  if (!message) return { totalCost, context: undefined }
+  const subagents = childTokens(children ?? {})
+  const subagentTokens = subagents.reduce((sum, item) => sum + item.tokens, 0)
+  const totalExecutionMs = assistantExecutionMs(messages)
+  if (!message) return { totalCost, context: undefined, subagents, subagentTokens, totalTokens: subagentTokens, totalExecutionMs }
 
   const provider = providers.find((item) => item.id === message.providerID)
   const model = provider?.models[message.modelID]
@@ -59,6 +106,10 @@ const build = (messages: Message[] = [], providers: Provider[] = []): Metrics =>
 
   return {
     totalCost,
+    subagents,
+    subagentTokens,
+    totalTokens: total + subagentTokens,
+    totalExecutionMs,
     context: {
       message,
       provider,
@@ -77,6 +128,10 @@ const build = (messages: Message[] = [], providers: Provider[] = []): Metrics =>
   }
 }
 
-export function getSessionContextMetrics(messages: Message[] = [], providers: Provider[] = []) {
-  return build(messages, providers)
+export function getSessionContextMetrics(
+  messages: Message[] = [],
+  providers: Provider[] = [],
+  children?: { sessionID?: string; sessions?: Session[]; messages?: Record<string, Message[] | undefined> },
+) {
+  return build(messages, providers, children)
 }

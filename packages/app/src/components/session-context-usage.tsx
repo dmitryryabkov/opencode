@@ -1,4 +1,4 @@
-import { Match, Show, Switch, createMemo } from "solid-js"
+import { Match, Show, Switch, createEffect, createMemo, createResource } from "solid-js"
 import { Tooltip, type TooltipProps } from "@opencode-ai/ui/tooltip"
 import { ProgressCircle } from "@opencode-ai/ui/progress-circle"
 import { Button } from "@opencode-ai/ui/button"
@@ -6,6 +6,7 @@ import { Button } from "@opencode-ai/ui/button"
 import { useFile } from "@/context/file"
 import { useLayout } from "@/context/layout"
 import { useSync } from "@/context/sync"
+import { useSDK } from "@/context/sdk"
 import { useLanguage } from "@/context/language"
 import { useProviders } from "@/hooks/use-providers"
 import { getSessionContextMetrics } from "@/components/session/session-context-metrics"
@@ -30,6 +31,7 @@ function openSessionContext(args: {
 
 export function SessionContextUsage(props: SessionContextUsageProps) {
   const sync = useSync()
+  const sdk = useSDK()
   const file = useFile()
   const layout = useLayout()
   const language = useLanguage()
@@ -43,6 +45,14 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
     normalizeTab: (tab) => (tab.startsWith("file://") ? file.tab(tab) : tab),
   })
   const messages = createMemo(() => (params.id ? (sync.data.message[params.id] ?? []) : []))
+  const [subagents] = createResource(
+    () => params.id,
+    async (sessionID) => (await sdk.client.session.children({ sessionID })).data ?? [],
+  )
+
+  createEffect(() => {
+    for (const subagent of subagents() ?? []) void sync.session.sync(subagent.id)
+  })
 
   const usd = createMemo(
     () =>
@@ -52,7 +62,13 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
       }),
   )
 
-  const metrics = createMemo(() => getSessionContextMetrics(messages(), providers.all()))
+  const metrics = createMemo(() =>
+    getSessionContextMetrics(messages(), providers.all(), {
+      sessionID: params.id,
+      sessions: [...sync.data.session, ...(subagents() ?? [])],
+      messages: sync.data.message,
+    }),
+  )
   const context = createMemo(() => metrics().context)
   const cost = createMemo(() => {
     return usd().format(metrics().totalCost)
@@ -85,7 +101,7 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
           <>
             <div class="flex items-center gap-2">
               <span class="text-text-invert-strong">{ctx().total.toLocaleString(language.intl())}</span>
-              <span class="text-text-invert-base">{language.t("context.usage.tokens")}</span>
+              <span class="text-text-invert-base">{language.t("context.usage.currentContextTokens")}</span>
             </div>
             <div class="flex items-center gap-2">
               <span class="text-text-invert-strong">{ctx().usage ?? 0}%</span>
@@ -93,6 +109,16 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
             </div>
           </>
         )}
+      </Show>
+      <Show when={metrics().subagentTokens > 0}>
+        <div class="flex items-center gap-2">
+          <span class="text-text-invert-strong">{metrics().subagentTokens.toLocaleString(language.intl())}</span>
+          <span class="text-text-invert-base">{language.t("context.usage.subagentTokens")}</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-text-invert-strong">{metrics().totalTokens.toLocaleString(language.intl())}</span>
+          <span class="text-text-invert-base">{language.t("context.usage.totalTokens")}</span>
+        </div>
       </Show>
       <div class="flex items-center gap-2">
         <span class="text-text-invert-strong">{cost()}</span>
