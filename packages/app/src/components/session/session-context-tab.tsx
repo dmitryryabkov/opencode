@@ -323,7 +323,7 @@ export function SessionContextTab() {
                   <div class="flex flex-col gap-2">
                     <Stat label={`Subagent ${index() + 1}`} value={subagentTask(subagent.title)} />
                     <Stat label={`Subagent ${index() + 1} Tokens`} value={formatter().number(subagent.tokens)} />
-                    <Stat label={`Subagent ${index() + 1} ${language.t("context.stats.subagentExecutionTime")}`} value={() => formatter().duration(subagent.executionMs)} />
+                    <Stat label={`Subagent ${index() + 1} ${language.t("context.stats.subagentExecutionTime")}`} value={formatter().duration(subagent.executionMs)} />
                   </div>
                 )}
               </For>
