@@ -14,20 +14,20 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   const theme = () => props.api.theme.current
   const msg = createMemo(() => props.api.state.session.messages(props.session_id))
   const cost = createMemo(() => msg().reduce((sum, item) => sum + (item.role === "assistant" ? item.cost : 0), 0))
-  const last = createMemo(() =>
-    msg().findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0),
-  )
   const tokenTotal = (message: AssistantMessage) =>
     message.tokens.input +
     message.tokens.output +
     message.tokens.reasoning +
     message.tokens.cache.read +
     message.tokens.cache.write
+  const last = createMemo(() =>
+    msg().findLast((item): item is AssistantMessage => item.role === "assistant" && tokenTotal(item) > 0),
+  )
   const isCompaction = (message: AssistantMessage) => message.mode === "compaction" || message.summary === true
   const sessionTokens = (sessionID: string) => {
     const message = props.api.state.session
       .messages(sessionID)
-      .findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
+      .findLast((item): item is AssistantMessage => item.role === "assistant" && tokenTotal(item) > 0)
     const compacted = props.api.state.session.compactionTokens(sessionID)
     return (
       (message ? tokenTotal(message) : 0) - (message && isCompaction(message) ? tokenTotal(message) : 0) + compacted
