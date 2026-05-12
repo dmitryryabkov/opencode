@@ -1,6 +1,7 @@
-import { createMemo, createEffect, on, onCleanup, For, Show } from "solid-js"
+import { createMemo, createEffect, on, onCleanup, For, Show, createResource } from "solid-js"
 import type { JSX } from "solid-js"
 import { useSync } from "@/context/sync"
+import { useSDK } from "@/context/sdk"
 import { checksum } from "@opencode-ai/core/util/encode"
 import { findLast } from "@opencode-ai/core/util/array"
 import { same } from "@/utils/same"
@@ -34,6 +35,8 @@ function Stat(props: { label: string; value: JSX.Element }) {
     </div>
   )
 }
+
+const subagentTask = (title: string) => title.replace(/\s*\(@\w+ subagent\)$/, "")
 
 function RawMessageContent(props: { message: Message; getParts: (id: string) => Part[]; onRendered: () => void }) {
   const file = createMemo(() => {
@@ -92,6 +95,7 @@ const emptyUserMessages: UserMessage[] = []
 
 export function SessionContextTab() {
   const sync = useSync()
+  const sdk = useSDK()
   const language = useLanguage()
   const providers = useProviders()
   const { params, view } = useSessionLayout()
@@ -107,6 +111,15 @@ export function SessionContextTab() {
     emptyMessages,
     { equals: same },
   )
+
+  const [subagents] = createResource(
+    () => params.id,
+    async (sessionID) => (await sdk.client.session.children({ sessionID })).data ?? [],
+  )
+
+  createEffect(() => {
+    for (const subagent of subagents() ?? []) void sync.session.sync(subagent.id)
+  })
 
   const userMessages = createMemo(
     () => messages().filter((m) => m.role === "user") as UserMessage[],
@@ -132,7 +145,13 @@ export function SessionContextTab() {
       }),
   )
 
-  const metrics = createMemo(() => getSessionContextMetrics(messages(), providers.all()))
+  const metrics = createMemo(() =>
+    getSessionContextMetrics(messages(), providers.all(), {
+      sessionID: params.id,
+      sessions: [...sync.data.session, ...(subagents() ?? [])],
+      messages: sync.data.message,
+    }),
+  )
   const ctx = createMemo(() => metrics().context)
   const formatter = createMemo(() => createSessionContextFormatter(language.intl()))
 
@@ -201,8 +220,10 @@ export function SessionContextTab() {
     { label: "context.stats.messages", value: () => counts().all.toLocaleString(language.intl()) },
     { label: "context.stats.provider", value: providerLabel },
     { label: "context.stats.model", value: modelLabel },
+    { label: "context.stats.totalTokens", value: () => formatter().number(metrics().totalTokens) },
+    { label: "context.stats.totalExecutionTime", value: () => formatter().duration(metrics().totalExecutionMs) },
     { label: "context.stats.limit", value: () => formatter().number(ctx()?.limit) },
-    { label: "context.stats.totalTokens", value: () => formatter().number(ctx()?.total) },
+    { label: "context.stats.currentContextTotalTokens", value: () => formatter().number(ctx()?.total) },
     { label: "context.stats.usage", value: () => formatter().percent(ctx()?.usage) },
     { label: "context.stats.inputTokens", value: () => formatter().number(ctx()?.input) },
     { label: "context.stats.outputTokens", value: () => formatter().number(ctx()?.output) },
@@ -282,6 +303,33 @@ export function SessionContextTab() {
             {(stat) => <Stat label={language.t(stat.label as Parameters<typeof language.t>[0])} value={stat.value()} />}
           </For>
         </div>
+
+        <Show when={metrics().subagents.length > 0}>
+          <div class="flex flex-col gap-2">
+            <div class="text-12-regular text-text-weak">Subagents</div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <div class="text-12-regular text-text-weak">{language.t("context.stats.totalSubagents")}</div>
+                <div class="text-12-medium text-text-strong">{metrics().subagents.length.toLocaleString(language.intl())}</div>
+              </div>
+              <div>
+                <div class="text-12-regular text-text-weak">{language.t("context.stats.subagentTokens")}</div>
+                <div class="text-12-medium text-text-strong">{formatter().number(metrics().subagentTokens)}</div>
+              </div>
+            </div>
+            <div class="grid grid-cols-1 @[32rem]:grid-cols-2 gap-4">
+              <For each={metrics().subagents}>
+                {(subagent, index) => (
+                  <div class="flex flex-col gap-2">
+                    <Stat label={`Subagent ${index() + 1}`} value={subagentTask(subagent.title)} />
+                    <Stat label={`Subagent ${index() + 1} Tokens`} value={formatter().number(subagent.tokens)} />
+                    <Stat label={`Subagent ${index() + 1} ${language.t("context.stats.subagentExecutionTime")}`} value={() => formatter().duration(subagent.executionMs)} />
+                  </div>
+                )}
+              </For>
+            </div>
+          </div>
+        </Show>
 
         <Show when={breakdown().length > 0}>
           <div class="flex flex-col gap-2">
