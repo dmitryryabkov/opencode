@@ -36,8 +36,6 @@ function Stat(props: { label: string; value: JSX.Element }) {
   )
 }
 
-const subagentTask = (title: string) => title.replace(/\s*\(@\w+ subagent\)$/, "")
-
 function RawMessageContent(props: { message: Message; getParts: (id: string) => Part[]; onRendered: () => void }) {
   const file = createMemo(() => {
     const parts = props.getParts(props.message.id)
@@ -223,7 +221,7 @@ export function SessionContextTab() {
     { label: "context.stats.totalTokens", value: () => formatter().number(metrics().totalTokens) },
     { label: "context.stats.totalExecutionTime", value: () => formatter().duration(metrics().totalExecutionMs) },
     { label: "context.stats.limit", value: () => formatter().number(ctx()?.limit) },
-    { label: "context.stats.currentContextTotalTokens", value: () => formatter().number(ctx()?.total) },
+    { label: "context.stats.currentContextTokens", value: () => formatter().number(ctx()?.total) },
     { label: "context.stats.usage", value: () => formatter().percent(ctx()?.usage) },
     { label: "context.stats.inputTokens", value: () => formatter().number(ctx()?.input) },
     { label: "context.stats.outputTokens", value: () => formatter().number(ctx()?.output) },
@@ -306,7 +304,7 @@ export function SessionContextTab() {
 
         <Show when={metrics().subagents.length > 0}>
           <div class="flex flex-col gap-2">
-            <div class="text-12-regular text-text-weak">Subagents</div>
+            <div class="text-12-regular text-text-weak">{language.t("context.stats.subagents")}</div>
             <div class="grid grid-cols-2 gap-4">
               <div>
                 <div class="text-12-regular text-text-weak">{language.t("context.stats.totalSubagents")}</div>
@@ -321,9 +319,9 @@ export function SessionContextTab() {
               <For each={metrics().subagents}>
                 {(subagent, index) => (
                   <div class="flex flex-col gap-2">
-                    <Stat label={`Subagent ${index() + 1}`} value={subagentTask(subagent.title)} />
-                    <Stat label={`Subagent ${index() + 1} Tokens`} value={formatter().number(subagent.tokens)} />
-                    <Stat label={`Subagent ${index() + 1} ${language.t("context.stats.subagentExecutionTime")}`} value={formatter().duration(subagent.executionMs)} />
+                    <Stat label={language.t("context.stats.subagentNumber", { index: index() + 1 })} value={subagent.title ?? subagent.agent ?? subagent.sessionID} />
+                    <Stat label={language.t("context.stats.subagentNumberTokens", { index: index() + 1 })} value={formatter().number(subagent.tokens)} />
+                    <Stat label={language.t("context.stats.subagentNumberExecutionTime", { index: index() + 1 })} value={formatter().duration(subagent.executionMs)} />
                   </div>
                 )}
               </For>

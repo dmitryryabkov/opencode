@@ -55,10 +55,6 @@ if (import.meta.env.VITE_SENTRY_DSN) {
 
 void initI18n()
 
-try {
-  if (!localStorage.getItem("opencode-color-scheme")) localStorage.setItem("opencode-color-scheme", "dark")
-} catch {}
-
 const deepLinkEvent = "opencode:deep-link"
 
 const emitDeepLinks = (urls: string[]) => {
@@ -210,14 +206,6 @@ const createPlatform = (): Platform => {
     },
 
     notify: async (title, description, href) => {
-      if (!("Notification" in window)) return
-
-      const permission =
-        Notification.permission === "default"
-          ? await Notification.requestPermission().catch(() => "denied")
-          : Notification.permission
-      if (permission !== "granted") return
-
       const focused = await window.api.getWindowFocused().catch(() => document.hasFocus())
       if (focused) return
 

@@ -101,7 +101,7 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
           <>
             <div class="flex items-center gap-2">
               <span class="text-text-invert-strong">{ctx().total.toLocaleString(language.intl())}</span>
-              <span class="text-text-invert-base">Current Context Total Tokens</span>
+              <span class="text-text-invert-base">{language.t("context.usage.currentContextTokens")}</span>
             </div>
             <div class="flex items-center gap-2">
               <span class="text-text-invert-strong">{ctx().usage ?? 0}%</span>
@@ -113,11 +113,11 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
       <Show when={metrics().subagentTokens > 0}>
         <div class="flex items-center gap-2">
           <span class="text-text-invert-strong">{metrics().subagentTokens.toLocaleString(language.intl())}</span>
-          <span class="text-text-invert-base">Subagent Tokens</span>
+          <span class="text-text-invert-base">{language.t("context.usage.subagentTokens")}</span>
         </div>
         <div class="flex items-center gap-2">
           <span class="text-text-invert-strong">{metrics().totalTokens.toLocaleString(language.intl())}</span>
-          <span class="text-text-invert-base">Total Tokens</span>
+          <span class="text-text-invert-base">{language.t("context.usage.totalTokens")}</span>
         </div>
       </Show>
       <div class="flex items-center gap-2">
