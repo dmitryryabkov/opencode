@@ -385,6 +385,7 @@ export type TuiState = {
     sessions: () => ReadonlyArray<Session>
     compactionTokens: (sessionID: string) => number
     cost: (sessionID: string) => number
+    sync: (sessionID: string) => Promise<void>
     diff: (sessionID: string) => ReadonlyArray<TuiSidebarFileItem>
     todo: (sessionID: string) => ReadonlyArray<TuiSidebarTodoItem>
     messages: (sessionID: string) => ReadonlyArray<Message>

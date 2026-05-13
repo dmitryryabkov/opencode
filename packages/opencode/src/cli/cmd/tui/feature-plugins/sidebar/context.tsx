@@ -1,7 +1,7 @@
 import type { AssistantMessage } from "@opencode-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { InternalTuiPlugin } from "../../plugin/internal"
-import { createMemo } from "solid-js"
+import { createEffect, createMemo } from "solid-js"
 
 const id = "internal:sidebar-context"
 
@@ -22,6 +22,17 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   const last = createMemo(() =>
     msg().findLast((item): item is AssistantMessage => item.role === "assistant" && tokenTotal(item) > 0),
   )
+  const childSessions = createMemo(() =>
+    props.api.state.session.sessions().filter((session) => session.parentID === props.session_id),
+  )
+  createEffect(() => {
+    for (const child of childSessions()) {
+      if (props.api.state.session.messages(child.id).length > 0) continue
+      const status = props.api.state.session.status(child.id)
+      if (status && status.type !== "idle") continue
+      void props.api.state.session.sync(child.id).catch(() => {})
+    }
+  })
   const isCompaction = (message: AssistantMessage) => message.mode === "compaction" || message.summary === true
   const sessionTokens = (sessionID: string) => {
     const message = props.api.state.session
@@ -51,18 +62,12 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   })
 
   const totalTokens = createMemo(() => {
-    const childTokens = props.api.state.session
-      .sessions()
-      .filter((session) => session.parentID === props.session_id)
-      .reduce((sum, child) => sum + sessionTokens(child.id), 0)
+    const childTokens = childSessions().reduce((sum, child) => sum + sessionTokens(child.id), 0)
 
     return sessionTokens(props.session_id) + childTokens
   })
   const totalCost = createMemo(() => {
-    const childCost = props.api.state.session
-      .sessions()
-      .filter((session) => session.parentID === props.session_id)
-      .reduce((sum, child) => sum + props.api.state.session.cost(child.id), 0)
+    const childCost = childSessions().reduce((sum, child) => sum + props.api.state.session.cost(child.id), 0)
 
     return props.api.state.session.cost(props.session_id) + childCost
   })
