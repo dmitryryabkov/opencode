@@ -1,0 +1,73 @@
+name: sync upstream
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: "Canonical OpenCode branch or tag to sync"
+        required: true
+        default: dev
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: open upstream sync PR
+    runs-on: ubuntu-latest
+    env:
+      BASE_REF: dev
+      UPSTREAM_REF: ${{ github.event.inputs.upstream_ref || 'dev' }}
+      UPSTREAM_REPOSITORY: anomalyco/opencode
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BASE_REF }}
+          fetch-depth: 0
+
+      - name: Merge upstream
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
+          git fetch upstream "${UPSTREAM_REF}"
+
+          sync_branch="upstream-sync/${UPSTREAM_REF//\//-}"
+          git switch --force-create "${sync_branch}" "origin/${BASE_REF}"
+
+          if ! git merge --no-edit --no-ff FETCH_HEAD; then
+            echo "::error::Upstream ${UPSTREAM_REPOSITORY}:${UPSTREAM_REF} conflicts with ${BASE_REF}. Resolve locally and push the result."
+            git status --short
+            exit 1
+          fi
+
+          if git diff --quiet "origin/${BASE_REF}..HEAD"; then
+            echo "No upstream changes to sync."
+            exit 0
+          fi
+
+          git push --force-with-lease origin "${sync_branch}"
+
+          if gh pr view "${sync_branch}" >/dev/null 2>&1; then
+            gh pr edit "${sync_branch}" --base "${BASE_REF}" --title "Sync upstream ${UPSTREAM_REF}" --body "Merge ${UPSTREAM_REPOSITORY}:${UPSTREAM_REF} into this fork's ${BASE_REF} branch."
+            gh pr view "${sync_branch}" --json url --jq .url
+            exit 0
+          fi
+
+          gh pr create \
+            --base "${BASE_REF}" \
+            --head "${sync_branch}" \
+            --title "Sync upstream ${UPSTREAM_REF}" \
+            --body "Merge ${UPSTREAM_REPOSITORY}:${UPSTREAM_REF} into this fork's ${BASE_REF} branch."
