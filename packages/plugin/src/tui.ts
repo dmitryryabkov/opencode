@@ -384,6 +384,7 @@ export type TuiState = {
     get: (sessionID: string) => Session | undefined
     sessions: () => ReadonlyArray<Session>
     compactionTokens: (sessionID: string) => number
+    cost: (sessionID: string) => number
     diff: (sessionID: string) => ReadonlyArray<TuiSidebarFileItem>
     todo: (sessionID: string) => ReadonlyArray<TuiSidebarTodoItem>
     messages: (sessionID: string) => ReadonlyArray<Message>

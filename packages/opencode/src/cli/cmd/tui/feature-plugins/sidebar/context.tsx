@@ -13,7 +13,6 @@ const money = new Intl.NumberFormat("en-US", {
 function View(props: { api: TuiPluginApi; session_id: string }) {
   const theme = () => props.api.theme.current
   const msg = createMemo(() => props.api.state.session.messages(props.session_id))
-  const cost = createMemo(() => msg().reduce((sum, item) => sum + (item.role === "assistant" ? item.cost : 0), 0))
   const tokenTotal = (message: AssistantMessage) =>
     message.tokens.input +
     message.tokens.output +
@@ -59,6 +58,14 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
 
     return sessionTokens(props.session_id) + childTokens
   })
+  const totalCost = createMemo(() => {
+    const childCost = props.api.state.session
+      .sessions()
+      .filter((session) => session.parentID === props.session_id)
+      .reduce((sum, child) => sum + props.api.state.session.cost(child.id), 0)
+
+    return props.api.state.session.cost(props.session_id) + childCost
+  })
 
   return (
     <box flexDirection="column" gap={1}>
@@ -74,7 +81,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
           <b>Total</b>
         </text>
         <text fg={theme().textMuted}>{totalTokens().toLocaleString()} tokens</text>
-        <text fg={theme().textMuted}>{money.format(cost())} spent</text>
+        <text fg={theme().textMuted}>{money.format(totalCost())} spent</text>
       </box>
     </box>
   )

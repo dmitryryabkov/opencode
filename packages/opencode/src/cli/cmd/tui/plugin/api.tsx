@@ -168,6 +168,14 @@ function stateApi(sync: ReturnType<typeof useSync>): TuiPluginApi["state"] {
           0,
         )
       },
+      cost(sessionID) {
+        const costs = sync.data.session_costs[sessionID]
+        if (costs) return Object.values(costs).reduce((sum, cost) => sum + cost, 0)
+        return (sync.data.message[sessionID] ?? []).reduce(
+          (sum, message) => sum + (message.role === "assistant" ? message.cost : 0),
+          0,
+        )
+      },
       messages(sessionID) {
         return sync.data.message[sessionID] ?? []
       },
