@@ -163,18 +163,10 @@ function stateApi(sync: ReturnType<typeof useSync>): TuiPluginApi["state"] {
         return sync.data.session
       },
       compactionTokens(sessionID) {
-        return Object.values(sync.data.session_compaction_tokens[sessionID] ?? {}).reduce(
-          (sum, tokens) => sum + tokens,
-          0,
-        )
+        return sync.data.session_total_compaction_tokens[sessionID] ?? 0
       },
       cost(sessionID) {
-        const costs = sync.data.session_costs[sessionID]
-        if (costs) return Object.values(costs).reduce((sum, cost) => sum + cost, 0)
-        return (sync.data.message[sessionID] ?? []).reduce(
-          (sum, message) => sum + (message.role === "assistant" ? message.cost : 0),
-          0,
-        )
+        return sync.data.session_total_cost[sessionID] ?? 0
       },
       sync(sessionID) {
         return sync.session.sync(sessionID)

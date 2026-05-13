@@ -45,11 +45,6 @@ const tokenTotal = (message: Message) => {
   )
 }
 
-const costTotal = (message: Message) => {
-  if (message.role !== "assistant") return 0
-  return message.cost
-}
-
 const isCompaction = (message: Message) => {
   if (message.role !== "assistant") return false
   return message.mode === "compaction" || message.summary === true
@@ -73,10 +68,13 @@ const compactionTokens = (messages: Message[]) => {
   )
 }
 
-const sessionCosts = (messages: Message[]) => {
-  return Object.fromEntries(
-    messages.flatMap((message) => (message.role === "assistant" ? [[message.id, costTotal(message)] as const] : [])),
-  )
+const sessionTotalCost = (messages: Message[]) => {
+  return messages.reduce((sum, message) => sum + (message.role === "assistant" ? message.cost : 0), 0)
+}
+
+const sessionTotalCompactionTokens = (messages: Message[]) => {
+  const map = compactionTokens(messages)
+  return Object.values(map).reduce((sum, t) => sum + t, 0)
 }
 
 export const { use: useSync, provider: SyncProvider } = createSimpleContext({
@@ -108,8 +106,11 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       session_compaction_tokens: {
         [sessionID: string]: Record<string, number>
       }
-      session_costs: {
-        [sessionID: string]: Record<string, number>
+      session_total_cost: {
+        [sessionID: string]: number
+      }
+      session_total_compaction_tokens: {
+        [sessionID: string]: number
       }
       todo: {
         [sessionID: string]: Todo[]
@@ -149,7 +150,8 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       session_status: {},
       session_diff: {},
       session_compaction_tokens: {},
-      session_costs: {},
+      session_total_cost: {},
+      session_total_compaction_tokens: {},
       todo: {},
       message: {},
       part: {},
@@ -305,18 +307,21 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
 
         case "message.updated": {
           const messages = store.message[event.properties.info.sessionID]
+          const sessionID = event.properties.info.sessionID
           if (event.properties.info.role === "assistant") {
-            setStore("session_costs", event.properties.info.sessionID, {
-              ...store.session_costs[event.properties.info.sessionID],
-              [event.properties.info.id]: costTotal(event.properties.info),
-            })
+            const oldCost = messages?.reduce((sum, m) => sum + (m.role === "assistant" ? m.cost : 0), 0) ?? 0
+            const newCost = oldCost - ((messages?.find(m => m.id === event.properties.info.id) as { cost?: number } | undefined)?.cost ?? 0) + event.properties.info.cost
+            setStore("session_total_cost", sessionID, newCost)
           }
           if (isCompaction(event.properties.info) && tokenTotal(event.properties.info) > 0) {
-            setStore("session_compaction_tokens", event.properties.info.sessionID, {
-              ...store.session_compaction_tokens[event.properties.info.sessionID],
+            const oldCompaction = store.session_compaction_tokens[sessionID] ?? {}
+            const newCompaction = {
+              ...oldCompaction,
               [event.properties.info.id]:
                 tokenTotal(event.properties.info) + lastContextBeforeCompaction(messages ?? [], event.properties.info),
-            })
+            }
+            setStore("session_compaction_tokens", sessionID, newCompaction)
+            setStore("session_total_compaction_tokens", sessionID, Object.values(newCompaction).reduce((s, t) => s + t, 0))
           }
           if (!messages) {
             setStore("message", event.properties.info.sessionID, [event.properties.info])
@@ -356,26 +361,24 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           break
         }
         case "message.removed": {
-          const messages = store.message[event.properties.sessionID]
-          const compaction = store.session_compaction_tokens[event.properties.sessionID]
-          const costs = store.session_costs[event.properties.sessionID]
-          if (compaction) {
+          const sessionID = event.properties.sessionID
+          const messages = store.message[sessionID]
+          const removed = messages?.find(m => m.id === event.properties.messageID)
+          if (removed?.role === "assistant") {
+            const oldCost = store.session_total_cost[sessionID] ?? 0
+            setStore("session_total_cost", sessionID, oldCost - removed.cost)
+          }
+          const compaction = store.session_compaction_tokens[sessionID]
+          if (compaction?.[event.properties.messageID]) {
             setStore(
               "session_compaction_tokens",
-              event.properties.sessionID,
+              sessionID,
               produce((draft) => {
                 delete draft[event.properties.messageID]
               }),
             )
-          }
-          if (costs) {
-            setStore(
-              "session_costs",
-              event.properties.sessionID,
-              produce((draft) => {
-                delete draft[event.properties.messageID]
-              }),
-            )
+            const remaining = store.session_compaction_tokens[sessionID]
+            setStore("session_total_compaction_tokens", sessionID, Object.values(remaining ?? {}).reduce((s, t) => s + t, 0))
           }
           const result = Binary.search(messages, event.properties.messageID, (m) => m.id)
           if (result.found) {
@@ -606,13 +609,14 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         },
         async sync(sessionID: string) {
           if (fullSyncedSessions.has(sessionID)) return
-          const [session, messages, allMessages, todo, diff] = await Promise.all([
+          const [session, allMessages, todo, diff] = await Promise.all([
             sdk.client.session.get({ sessionID }, { throwOnError: true }),
-            sdk.client.session.messages({ sessionID, limit: 100 }),
             sdk.client.session.messages({ sessionID }),
             sdk.client.session.todo({ sessionID }),
             sdk.client.session.diff({ sessionID }),
           ])
+          const all = (allMessages.data ?? []).map((x) => x.info)
+          const limited = all.slice(0, 100)
           setStore(
             produce((draft) => {
               const match = Binary.search(draft.session, sessionID, (s) => s.id)
@@ -620,13 +624,15 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
               if (!match.found) draft.session.splice(match.index, 0, session.data!)
               draft.todo[sessionID] = todo.data ?? []
               const infos: (typeof draft.message)[string] = []
-              for (const message of messages.data ?? []) {
-                infos.push(message.info)
-                draft.part[message.info.id] = message.parts
+              for (const message of limited) {
+                infos.push(message)
+                const full = allMessages.data?.find(x => x.info.id === message.id)
+                if (full) draft.part[message.id] = full.parts
               }
               draft.message[sessionID] = infos
-              draft.session_compaction_tokens[sessionID] = compactionTokens((allMessages.data ?? []).map((x) => x.info))
-              draft.session_costs[sessionID] = sessionCosts((allMessages.data ?? []).map((x) => x.info))
+              draft.session_compaction_tokens[sessionID] = compactionTokens(all)
+              draft.session_total_cost[sessionID] = sessionTotalCost(all)
+              draft.session_total_compaction_tokens[sessionID] = sessionTotalCompactionTokens(all)
               draft.session_diff[sessionID] = diff.data ?? []
             }),
           )

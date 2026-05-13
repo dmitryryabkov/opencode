@@ -44,6 +44,13 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
     )
   }
 
+  const childTokenMap = createMemo(() => {
+    const children = childSessions()
+    return Object.fromEntries(
+      children.map(child => [child.id, { tokens: sessionTokens(child.id), cost: props.api.state.session.cost(child.id) }]),
+    )
+  })
+
   const state = createMemo(() => {
     const message = last()
     if (!message) {
@@ -62,12 +69,12 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   })
 
   const totalTokens = createMemo(() => {
-    const childTokens = childSessions().reduce((sum, child) => sum + sessionTokens(child.id), 0)
+    const childTokens = childSessions().reduce((sum, child) => sum + (childTokenMap()[child.id]?.tokens ?? 0), 0)
 
     return sessionTokens(props.session_id) + childTokens
   })
   const totalCost = createMemo(() => {
-    const childCost = childSessions().reduce((sum, child) => sum + props.api.state.session.cost(child.id), 0)
+    const childCost = childSessions().reduce((sum, child) => sum + (childTokenMap()[child.id]?.cost ?? 0), 0)
 
     return props.api.state.session.cost(props.session_id) + childCost
   })
