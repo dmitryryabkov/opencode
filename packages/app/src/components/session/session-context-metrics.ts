@@ -44,8 +44,19 @@ type Metrics = {
   totalExecutionMs: number
 }
 
+type Input = {
+  sessionID?: string
+  sessions?: Session[]
+  messages?: Record<string, Message[] | undefined>
+  histories?: Record<string, Message[] | undefined>
+}
+
 const tokenTotal = (msg: AssistantMessage) => {
   return msg.tokens.input + msg.tokens.output + msg.tokens.reasoning + msg.tokens.cache.read + msg.tokens.cache.write
+}
+
+const isCompaction = (msg: AssistantMessage) => {
+  return msg.summary === true || msg.mode === "compaction"
 }
 
 const lastAssistantWithTokens = (messages: Message[]) => {
@@ -67,37 +78,86 @@ const assistantExecutionMs = (messages: Message[]) => {
   }, 0)
 }
 
-const childTokens = (input: { sessionID?: string; sessions?: Session[]; messages?: Record<string, Message[] | undefined> }) => {
-  if (!input.sessionID) return []
-  return [...new Map((input.sessions ?? []).map((session) => [session.id, session])).values()]
-    .filter((session) => session.parentID === input.sessionID)
-    .map((session) => {
-      const messages = input.messages?.[session.id] ?? []
-      return {
-        sessionID: session.id,
-        title: session.title,
-        agent: session.agent,
-        tokens: tokenTotal(lastAssistantWithTokens(messages) ?? emptyAssistant),
-        executionMs: assistantExecutionMs(messages),
-      }
-    })
+const lastContextBeforeCompaction = (messages: Message[], compaction: AssistantMessage) => {
+  const index = messages.findIndex((message) => message.id === compaction.parentID)
+  const last = messages
+    .slice(0, index < 0 ? messages.length : index)
+    .findLast((message): message is AssistantMessage => message.role === "assistant" && tokenTotal(message) > 0)
+  return last ? tokenTotal(last) : 0
 }
 
-const emptyAssistant = {
-  tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-} as AssistantMessage
+const compactionTokens = (messages: Message[]) => {
+  return messages.reduce((sum, message) => {
+    if (message.role !== "assistant") return sum
+    if (!isCompaction(message)) return sum
+    if (tokenTotal(message) <= 0) return sum
+    return sum + tokenTotal(message) + lastContextBeforeCompaction(messages, message)
+  }, 0)
+}
 
-const build = (
-  messages: Message[] = [],
-  providers: Provider[] = [],
-  children?: { sessionID?: string; sessions?: Session[]; messages?: Record<string, Message[] | undefined> },
-): Metrics => {
-  const totalCost = messages.reduce((sum, msg) => sum + (msg.role === "assistant" ? msg.cost : 0), 0)
+const sessionTokens = (messages: Message[]) => {
+  const message = lastAssistantWithTokens(messages)
+  return (
+    (message ? tokenTotal(message) : 0) -
+    (message && isCompaction(message) ? tokenTotal(message) : 0) +
+    compactionTokens(messages)
+  )
+}
+
+const sessionCost = (messages: Message[]) => {
+  return messages.reduce((sum, msg) => sum + (msg.role === "assistant" ? msg.cost : 0), 0)
+}
+
+const mergeMessages = (history: Message[] | undefined, live: Message[] | undefined) => {
+  if (!history?.length) return live ?? []
+  if (!live?.length) return history
+  const liveByID = new Map(live.map((message) => [message.id, message]))
+  const historyIDs = new Set(history.map((message) => message.id))
+  return [
+    ...history.map((message) => liveByID.get(message.id) ?? message),
+    ...live.filter((message) => !historyIDs.has(message.id)),
+  ]
+}
+
+const inputMessages = (input: Input | undefined, sessionID: string) => {
+  return mergeMessages(input?.histories?.[sessionID], input?.messages?.[sessionID])
+}
+
+const childSessions = (input: Input) => {
+  if (!input.sessionID) return []
+  return [...new Map((input.sessions ?? []).map((session) => [session.id, session])).values()].filter(
+    (session) => session.parentID === input.sessionID,
+  )
+}
+
+const childTokens = (input: Input) => {
+  return childSessions(input).map((session) => {
+    const messages = inputMessages(input, session.id)
+    return {
+      sessionID: session.id,
+      title: session.title,
+      agent: session.agent,
+      tokens: sessionTokens(messages),
+      executionMs: assistantExecutionMs(messages),
+    }
+  })
+}
+
+const build = (messages: Message[] = [], providers: Provider[] = [], children?: Input): Metrics => {
+  const rootMessages = children?.sessionID
+    ? mergeMessages(children.histories?.[children.sessionID], children.messages?.[children.sessionID] ?? messages)
+    : messages
   const message = lastAssistantWithTokens(messages)
   const subagents = childTokens(children ?? {})
   const subagentTokens = subagents.reduce((sum, item) => sum + item.tokens, 0)
-  const totalExecutionMs = assistantExecutionMs(messages)
-  if (!message) return { totalCost, context: undefined, subagents, subagentTokens, totalTokens: subagentTokens, totalExecutionMs }
+  const subagentCost = childSessions(children ?? {}).reduce(
+    (sum, session) => sum + sessionCost(inputMessages(children, session.id)),
+    0,
+  )
+  const totalCost = sessionCost(rootMessages) + subagentCost
+  const totalExecutionMs = assistantExecutionMs(rootMessages)
+  const totalTokens = sessionTokens(rootMessages) + subagentTokens
+  if (!message) return { totalCost, context: undefined, subagents, subagentTokens, totalTokens, totalExecutionMs }
 
   const provider = providers.find((item) => item.id === message.providerID)
   const model = provider?.models[message.modelID]
@@ -108,7 +168,7 @@ const build = (
     totalCost,
     subagents,
     subagentTokens,
-    totalTokens: total + subagentTokens,
+    totalTokens,
     totalExecutionMs,
     context: {
       message,
@@ -128,10 +188,6 @@ const build = (
   }
 }
 
-export function getSessionContextMetrics(
-  messages: Message[] = [],
-  providers: Provider[] = [],
-  children?: { sessionID?: string; sessions?: Session[]; messages?: Record<string, Message[] | undefined> },
-) {
+export function getSessionContextMetrics(messages: Message[] = [], providers: Provider[] = [], children?: Input) {
   return build(messages, providers, children)
 }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import type { Message, Session } from "@opencode-ai/sdk/v2/client"
+import type { AssistantMessage, Message, Session, SessionStatus } from "@opencode-ai/sdk/v2/client"
 import { getSessionContextMetrics } from "./session-context-metrics"
+import { sessionContextHistoryInput } from "./session-context-metrics-data"
 
 const assistant = (
   id: string,
@@ -9,6 +10,7 @@ const assistant = (
   providerID = "openai",
   modelID = "gpt-4.1",
   time = { created: 1, completed: 1 },
+  extra: Partial<AssistantMessage> = {},
 ) => {
   return {
     id,
@@ -26,6 +28,7 @@ const assistant = (
       },
     },
     time,
+    ...extra,
   } as unknown as Message
 }
 
@@ -41,6 +44,8 @@ const user = (id: string) => {
 const session = (id: string, parentID?: string) => {
   return { id, parentID } as Session
 }
+
+const busy = { type: "busy" } as SessionStatus
 
 describe("getSessionContextMetrics", () => {
   test("computes totals and usage from latest assistant with tokens", () => {
@@ -77,7 +82,12 @@ describe("getSessionContextMetrics", () => {
 
   test("adds latest child session assistant tokens to total tokens", () => {
     const metrics = getSessionContextMetrics(
-      [assistant("parent", { input: 100, output: 50, reasoning: 0, read: 0, write: 0 }, 0.5, "openai", "gpt-4.1", { created: 1_000, completed: 4_000 })],
+      [
+        assistant("parent", { input: 100, output: 50, reasoning: 0, read: 0, write: 0 }, 0.5, "openai", "gpt-4.1", {
+          created: 1_000,
+          completed: 4_000,
+        }),
+      ],
       [{ id: "openai", models: {} }],
       {
         sessionID: "ses_parent",
@@ -85,9 +95,21 @@ describe("getSessionContextMetrics", () => {
         messages: {
           ses_child_1: [
             assistant("child_1_old", { input: 10, output: 10, reasoning: 0, read: 0, write: 0 }, 0.1),
-            assistant("child_1_new", { input: 20, output: 10, reasoning: 5, read: 5, write: 0 }, 0.1, "openai", "gpt-4.1", { created: 5_000, completed: 11_000 }),
+            assistant(
+              "child_1_new",
+              { input: 20, output: 10, reasoning: 5, read: 5, write: 0 },
+              0.1,
+              "openai",
+              "gpt-4.1",
+              { created: 5_000, completed: 11_000 },
+            ),
           ],
-          ses_child_2: [assistant("child_2", { input: 5, output: 5, reasoning: 5, read: 0, write: 0 }, 0.1, "openai", "gpt-4.1", { created: 20_000, completed: 23_000 })],
+          ses_child_2: [
+            assistant("child_2", { input: 5, output: 5, reasoning: 5, read: 0, write: 0 }, 0.1, "openai", "gpt-4.1", {
+              created: 20_000,
+              completed: 23_000,
+            }),
+          ],
         },
       },
     )
@@ -101,7 +123,94 @@ describe("getSessionContextMetrics", () => {
     expect(metrics.subagents[1]?.executionMs).toBe(3000)
     expect(metrics.subagentTokens).toBe(55)
     expect(metrics.totalTokens).toBe(205)
+    expect(metrics.totalCost).toBe(0.8)
     expect(metrics.totalExecutionMs).toBe(3000)
+  })
+
+  test("uses full histories for compacted parent tokens and cost", () => {
+    const visible = [
+      assistant("current", { input: 15, output: 5, reasoning: 0, read: 0, write: 0 }, 2, "openai", "gpt-4.1", {
+        created: 7_000,
+        completed: 9_000,
+      }),
+    ]
+    const history = [
+      user("u1"),
+      assistant("before_compaction", { input: 80, output: 20, reasoning: 0, read: 0, write: 0 }, 1),
+      user("compact"),
+      assistant(
+        "compaction",
+        { input: 10, output: 5, reasoning: 0, read: 0, write: 0 },
+        0.2,
+        "openai",
+        "gpt-4.1",
+        { created: 5_000, completed: 6_000 },
+        { mode: "compaction", summary: true, parentID: "compact" },
+      ),
+    ]
+
+    const metrics = getSessionContextMetrics(visible, [{ id: "openai", models: {} }], {
+      sessionID: "ses_parent",
+      sessions: [session("ses_parent")],
+      histories: { ses_parent: history },
+    })
+
+    expect(metrics.context?.total).toBe(20)
+    expect(metrics.totalTokens).toBe(135)
+    expect(metrics.totalCost).toBe(3.2)
+    expect(metrics.totalExecutionMs).toBe(2000)
+  })
+
+  test("adds child compaction tokens and child costs to totals", () => {
+    const parent = [
+      assistant("parent", { input: 100, output: 50, reasoning: 0, read: 0, write: 0 }, 0.5, "openai", "gpt-4.1", {
+        created: 1_000,
+        completed: 4_000,
+      }),
+    ]
+    const child = [
+      assistant("child_before", { input: 80, output: 20, reasoning: 0, read: 0, write: 0 }, 1),
+      user("child_compact"),
+      assistant(
+        "child_compaction",
+        { input: 10, output: 5, reasoning: 0, read: 0, write: 0 },
+        0.2,
+        "openai",
+        "gpt-4.1",
+        { created: 5_000, completed: 6_000 },
+        { mode: "compaction", summary: true, parentID: "child_compact" },
+      ),
+    ]
+    const childCurrent = assistant(
+      "child_current",
+      { input: 15, output: 5, reasoning: 0, read: 0, write: 0 },
+      2,
+      "openai",
+      "gpt-4.1",
+      {
+        created: 7_000,
+        completed: 9_000,
+      },
+    )
+
+    const metrics = getSessionContextMetrics(parent, [{ id: "openai", models: {} }], {
+      sessionID: "ses_parent",
+      sessions: [session("ses_parent"), session("ses_child", "ses_parent"), session("ses_child", "ses_parent")],
+      messages: {
+        ses_child: [childCurrent],
+      },
+      histories: {
+        ses_parent: parent,
+        ses_child: child,
+      },
+    })
+
+    expect(metrics.context?.total).toBe(150)
+    expect(metrics.subagents).toHaveLength(1)
+    expect(metrics.subagents[0]?.tokens).toBe(135)
+    expect(metrics.subagentTokens).toBe(135)
+    expect(metrics.totalTokens).toBe(285)
+    expect(metrics.totalCost).toBe(3.7)
   })
 
   test("keeps subagent totals when parent has no assistant tokens", () => {
@@ -153,5 +262,43 @@ describe("getSessionContextMetrics", () => {
     expect(metrics.subagentTokens).toBe(0)
     expect(metrics.totalTokens).toBe(0)
     expect(metrics.totalExecutionMs).toBe(0)
+  })
+})
+
+describe("sessionContextHistoryInput", () => {
+  test("waits for idle sessions with assistant history before loading full histories", () => {
+    const child = session("ses_child", "ses_parent")
+    const messages = {
+      ses_parent: [user("u1"), assistant("a1", { input: 1, output: 1, reasoning: 0, read: 0, write: 0 }, 0)],
+      ses_child: [assistant("child", { input: 1, output: 1, reasoning: 0, read: 0, write: 0 }, 0)],
+    }
+
+    expect(
+      sessionContextHistoryInput({
+        sessionID: "ses_parent",
+        childSessions: [child],
+        messages: { ses_parent: [user("u1")] },
+        statuses: {},
+      }),
+    ).toBeUndefined()
+    expect(
+      sessionContextHistoryInput({
+        sessionID: "ses_parent",
+        childSessions: [child],
+        messages,
+        statuses: { ses_child: busy },
+      }),
+    ).toBeUndefined()
+    expect(
+      sessionContextHistoryInput({
+        sessionID: "ses_parent",
+        childSessions: [child],
+        messages,
+        statuses: {},
+      }),
+    ).toEqual({
+      sessionID: "ses_parent",
+      childSessions: [child],
+    })
   })
 })

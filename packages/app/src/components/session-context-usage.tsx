@@ -10,6 +10,10 @@ import { useSDK } from "@/context/sdk"
 import { useLanguage } from "@/context/language"
 import { useProviders } from "@/hooks/use-providers"
 import { getSessionContextMetrics } from "@/components/session/session-context-metrics"
+import {
+  loadSessionContextMessages,
+  sessionContextHistoryInput,
+} from "@/components/session/session-context-metrics-data"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { createSessionTabs } from "@/pages/session/helpers"
 
@@ -53,6 +57,21 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
   createEffect(() => {
     for (const subagent of subagents() ?? []) void sync.session.sync(subagent.id)
   })
+  const [histories] = createResource(
+    () =>
+      sessionContextHistoryInput({
+        sessionID: params.id,
+        childSessions: subagents(),
+        messages: sync.data.message,
+        statuses: sync.data.session_status,
+      }),
+    (input) =>
+      loadSessionContextMessages({
+        client: sdk.client,
+        sessionID: input.sessionID,
+        childSessions: input.childSessions,
+      }),
+  )
 
   const usd = createMemo(
     () =>
@@ -67,6 +86,7 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
       sessionID: params.id,
       sessions: [...sync.data.session, ...(subagents() ?? [])],
       messages: sync.data.message,
+      histories: histories(),
     }),
   )
   const context = createMemo(() => metrics().context)

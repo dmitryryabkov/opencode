@@ -16,6 +16,7 @@ import { useLanguage } from "@/context/language"
 import { useProviders } from "@/hooks/use-providers"
 import { useSessionLayout } from "@/pages/session/session-layout"
 import { getSessionContextMetrics } from "./session-context-metrics"
+import { loadSessionContextMessages, sessionContextHistoryInput } from "./session-context-metrics-data"
 import { estimateSessionContextBreakdown, type SessionContextBreakdownKey } from "./session-context-breakdown"
 import { createSessionContextFormatter } from "./session-context-format"
 
@@ -118,6 +119,21 @@ export function SessionContextTab() {
   createEffect(() => {
     for (const subagent of subagents() ?? []) void sync.session.sync(subagent.id)
   })
+  const [histories] = createResource(
+    () =>
+      sessionContextHistoryInput({
+        sessionID: params.id,
+        childSessions: subagents(),
+        messages: sync.data.message,
+        statuses: sync.data.session_status,
+      }),
+    (input) =>
+      loadSessionContextMessages({
+        client: sdk.client,
+        sessionID: input.sessionID,
+        childSessions: input.childSessions,
+      }),
+  )
 
   const userMessages = createMemo(
     () => messages().filter((m) => m.role === "user") as UserMessage[],
@@ -148,6 +164,7 @@ export function SessionContextTab() {
       sessionID: params.id,
       sessions: [...sync.data.session, ...(subagents() ?? [])],
       messages: sync.data.message,
+      histories: histories(),
     }),
   )
   const ctx = createMemo(() => metrics().context)
@@ -308,7 +325,9 @@ export function SessionContextTab() {
             <div class="grid grid-cols-2 gap-4">
               <div>
                 <div class="text-12-regular text-text-weak">{language.t("context.stats.totalSubagents")}</div>
-                <div class="text-12-medium text-text-strong">{metrics().subagents.length.toLocaleString(language.intl())}</div>
+                <div class="text-12-medium text-text-strong">
+                  {metrics().subagents.length.toLocaleString(language.intl())}
+                </div>
               </div>
               <div>
                 <div class="text-12-regular text-text-weak">{language.t("context.stats.subagentTokens")}</div>
@@ -319,9 +338,18 @@ export function SessionContextTab() {
               <For each={metrics().subagents}>
                 {(subagent, index) => (
                   <div class="flex flex-col gap-2">
-                    <Stat label={language.t("context.stats.subagentNumber", { index: index() + 1 })} value={subagent.title ?? subagent.agent ?? subagent.sessionID} />
-                    <Stat label={language.t("context.stats.subagentNumberTokens", { index: index() + 1 })} value={formatter().number(subagent.tokens)} />
-                    <Stat label={language.t("context.stats.subagentNumberExecutionTime", { index: index() + 1 })} value={formatter().duration(subagent.executionMs)} />
+                    <Stat
+                      label={language.t("context.stats.subagentNumber", { index: index() + 1 })}
+                      value={subagent.title ?? subagent.agent ?? subagent.sessionID}
+                    />
+                    <Stat
+                      label={language.t("context.stats.subagentNumberTokens", { index: index() + 1 })}
+                      value={formatter().number(subagent.tokens)}
+                    />
+                    <Stat
+                      label={language.t("context.stats.subagentNumberExecutionTime", { index: index() + 1 })}
+                      value={formatter().duration(subagent.executionMs)}
+                    />
                   </div>
                 )}
               </For>
