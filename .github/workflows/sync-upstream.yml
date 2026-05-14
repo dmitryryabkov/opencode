@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   sync:
-    name: open upstream sync PR
+    name: sync upstream branch
     runs-on: ubuntu-latest
     env:
       BASE_REF: dev
@@ -60,14 +60,37 @@ jobs:
 
           git push --force-with-lease origin "${sync_branch}"
 
+          pr_body="Merge ${UPSTREAM_REPOSITORY}:${UPSTREAM_REF} into this fork's ${BASE_REF} branch."
+          pr_url="https://github.com/${GITHUB_REPOSITORY}/compare/${BASE_REF}...${sync_branch}?expand=1"
+
           if gh pr view "${sync_branch}" >/dev/null 2>&1; then
-            gh pr edit "${sync_branch}" --base "${BASE_REF}" --title "Sync upstream ${UPSTREAM_REF}" --body "Merge ${UPSTREAM_REPOSITORY}:${UPSTREAM_REF} into this fork's ${BASE_REF} branch."
-            gh pr view "${sync_branch}" --json url --jq .url
+            if gh pr edit "${sync_branch}" --base "${BASE_REF}" --title "Sync upstream ${UPSTREAM_REF}" --body "${pr_body}"; then
+              gh pr view "${sync_branch}" --json url --jq .url
+              exit 0
+            fi
+            echo "::warning::Updated ${sync_branch}, but GitHub blocked updating the pull request."
+            echo "Open or update the pull request manually: ${pr_url}"
             exit 0
           fi
 
-          gh pr create \
+          if gh pr create \
             --base "${BASE_REF}" \
             --head "${sync_branch}" \
             --title "Sync upstream ${UPSTREAM_REF}" \
-            --body "Merge ${UPSTREAM_REPOSITORY}:${UPSTREAM_REF} into this fork's ${BASE_REF} branch."
+            --body "${pr_body}"; then
+            exit 0
+          fi
+
+          echo "::warning::Updated ${sync_branch}, but GitHub blocked creating the pull request."
+          echo "Open the pull request manually: ${pr_url}"
+          {
+            echo "### Upstream sync branch pushed"
+            echo ""
+            echo "GitHub blocked this workflow from creating the pull request."
+            echo ""
+            echo "- Branch: \`${sync_branch}\`"
+            echo "- Base: \`${BASE_REF}\`"
+            echo "- Manual PR: ${pr_url}"
+            echo ""
+            echo "To allow automatic PR creation, enable **Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests**."
+          } >> "${GITHUB_STEP_SUMMARY}"
