@@ -5,7 +5,7 @@ import * as fs from "node:fs/promises"
 
 const channel = (() => {
   const raw = process.env.OPENCODE_CHANNEL
-  if (raw === "dev" || raw === "beta" || raw === "prod") return raw
+  if (raw === "dev" || raw === "beta" || raw === "prod" || raw === "dogfood") return raw
   return "dev"
 })()
 
