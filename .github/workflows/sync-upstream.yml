@@ -7,8 +7,13 @@ on:
         description: "Canonical OpenCode branch or tag to sync"
         required: true
         default: dev
+      auto_merge:
+        description: "Merge the sync PR automatically when GitHub allows it"
+        required: true
+        type: boolean
+        default: true
   schedule:
-    - cron: "17 6 * * 1"
+    - cron: "17 6 * * *"
 
 permissions:
   contents: write
@@ -26,6 +31,7 @@ jobs:
       BASE_REF: dev
       UPSTREAM_REF: ${{ github.event.inputs.upstream_ref || 'dev' }}
       UPSTREAM_REPOSITORY: anomalyco/opencode
+      AUTO_MERGE: ${{ github.event_name == 'schedule' || github.event.inputs.auto_merge == 'true' }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout fork
@@ -65,32 +71,56 @@ jobs:
 
           if gh pr view "${sync_branch}" >/dev/null 2>&1; then
             if gh pr edit "${sync_branch}" --base "${BASE_REF}" --title "Sync upstream ${UPSTREAM_REF}" --body "${pr_body}"; then
-              gh pr view "${sync_branch}" --json url --jq .url
+              pr_number="$(gh pr view "${sync_branch}" --json number --jq .number)"
+              pr_url="$(gh pr view "${sync_branch}" --json url --jq .url)"
+            else
+              echo "::warning::Updated ${sync_branch}, but GitHub blocked updating the pull request."
+              echo "Open or update the pull request manually: ${pr_url}"
               exit 0
             fi
-            echo "::warning::Updated ${sync_branch}, but GitHub blocked updating the pull request."
-            echo "Open or update the pull request manually: ${pr_url}"
-            exit 0
-          fi
-
-          if gh pr create \
+          elif gh pr create \
             --base "${BASE_REF}" \
             --head "${sync_branch}" \
             --title "Sync upstream ${UPSTREAM_REF}" \
             --body "${pr_body}"; then
+            pr_number="$(gh pr view "${sync_branch}" --json number --jq .number)"
+            pr_url="$(gh pr view "${sync_branch}" --json url --jq .url)"
+          else
+            echo "::warning::Updated ${sync_branch}, but GitHub blocked creating the pull request."
+            echo "Open the pull request manually: ${pr_url}"
+            {
+              echo "### Upstream sync branch pushed"
+              echo ""
+              echo "GitHub blocked this workflow from creating the pull request."
+              echo ""
+              echo "- Branch: \`${sync_branch}\`"
+              echo "- Base: \`${BASE_REF}\`"
+              echo "- Manual PR: ${pr_url}"
+              echo ""
+              echo "To allow automatic PR creation, enable **Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests**."
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 0
           fi
 
-          echo "::warning::Updated ${sync_branch}, but GitHub blocked creating the pull request."
-          echo "Open the pull request manually: ${pr_url}"
+          if [ "${AUTO_MERGE}" != "true" ]; then
+            echo "Upstream sync PR ready: ${pr_url}"
+            exit 0
+          fi
+
+          if gh pr merge "${pr_number}" --merge --delete-branch; then
+            echo "Merged upstream sync PR: ${pr_url}"
+            exit 0
+          fi
+
+          echo "::warning::Upstream sync PR is ready, but GitHub blocked automatic merge."
+          echo "Merge manually with a merge commit: ${pr_url}"
           {
-            echo "### Upstream sync branch pushed"
+            echo "### Upstream sync PR ready"
             echo ""
-            echo "GitHub blocked this workflow from creating the pull request."
+            echo "GitHub blocked this workflow from automatically merging the pull request."
             echo ""
-            echo "- Branch: \`${sync_branch}\`"
-            echo "- Base: \`${BASE_REF}\`"
-            echo "- Manual PR: ${pr_url}"
+            echo "- PR: ${pr_url}"
+            echo "- Merge mode: merge commit"
             echo ""
-            echo "To allow automatic PR creation, enable **Settings > Actions > General > Workflow permissions > Allow GitHub Actions to create and approve pull requests**."
+            echo "Check branch protection, required checks, and workflow permissions if you want the workflow to merge it automatically."
           } >> "${GITHUB_STEP_SUMMARY}"
