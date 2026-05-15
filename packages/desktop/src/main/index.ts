@@ -135,6 +135,7 @@ const main = Effect.gen(function* () {
     process.env.XDG_CONFIG_HOME = join(app.getPath("userData"), "config")
     process.env.XDG_CACHE_HOME = join(app.getPath("userData"), "cache")
     process.env.XDG_STATE_HOME = join(app.getPath("userData"), "state")
+    process.env.OPENCODE_DISABLE_PROJECT_CONFIG = "true"
   }
   logger = initLogging()
 
