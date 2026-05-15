@@ -53,21 +53,29 @@ jobs:
           sync_branch="upstream-sync/${UPSTREAM_REF//\//-}"
           git switch --force-create "${sync_branch}" "origin/${BASE_REF}"
 
-          if ! git merge --no-edit --no-ff FETCH_HEAD; then
-            echo "::error::Upstream ${UPSTREAM_REPOSITORY}:${UPSTREAM_REF} conflicts with ${BASE_REF}. Resolve locally and push the result."
-            git status --short
-            exit 1
-          fi
-
           # This fork owns its GitHub metadata. Keep upstream workflow and issue
           # automation out of sync branches so GITHUB_TOKEN does not need the
           # workflow scope and the fork does not re-enable upstream automation.
+          if ! git merge --no-commit --no-ff FETCH_HEAD; then
+            git checkout --ours .github >/dev/null 2>&1 || true
+            git add .github >/dev/null 2>&1 || true
+
+            if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+              echo "::error::Upstream ${UPSTREAM_REPOSITORY}:${UPSTREAM_REF} conflicts with ${BASE_REF}. Resolve locally and push the result."
+              git status --short
+              exit 1
+            fi
+          fi
+
           git restore --source "origin/${BASE_REF}" --staged --worktree .github
 
-          if git diff --quiet "origin/${BASE_REF}..HEAD"; then
+          if git diff --quiet HEAD --; then
+            git merge --abort >/dev/null 2>&1 || true
             echo "No upstream changes to sync."
             exit 0
           fi
+
+          git commit -m "Merge ${UPSTREAM_REPOSITORY}:${UPSTREAM_REF} into ${BASE_REF}"
 
           git push --force-with-lease origin "${sync_branch}"
 
