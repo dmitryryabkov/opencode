@@ -235,10 +235,7 @@ export function SessionContextTab() {
     { label: "context.stats.messages", value: () => counts().all.toLocaleString(language.intl()) },
     { label: "context.stats.provider", value: providerLabel },
     { label: "context.stats.model", value: modelLabel },
-    { label: "context.stats.totalTokens", value: () => formatter().number(metrics().totalTokens) },
-    { label: "context.stats.totalExecutionTime", value: () => formatter().duration(metrics().totalExecutionMs) },
     { label: "context.stats.limit", value: () => formatter().number(ctx()?.limit) },
-    { label: "context.stats.currentContextTokens", value: () => formatter().number(ctx()?.total) },
     { label: "context.stats.usage", value: () => formatter().percent(ctx()?.usage) },
     { label: "context.stats.inputTokens", value: () => formatter().number(ctx()?.input) },
     { label: "context.stats.outputTokens", value: () => formatter().number(ctx()?.output) },
@@ -249,9 +246,22 @@ export function SessionContextTab() {
     },
     { label: "context.stats.userMessages", value: () => counts().user.toLocaleString(language.intl()) },
     { label: "context.stats.assistantMessages", value: () => counts().assistant.toLocaleString(language.intl()) },
-    { label: "context.stats.totalCost", value: cost },
     { label: "context.stats.sessionCreated", value: () => formatter().time(info()?.time.created) },
     { label: "context.stats.lastActivity", value: () => formatter().time(ctx()?.message.time.created) },
+  ] satisfies { label: string; value: () => JSX.Element }[]
+
+  const totalStats = [
+    { label: "context.stats.currentContextTokens", value: () => formatter().number(ctx()?.total) },
+    { label: "context.stats.totalTokens", value: () => formatter().number(metrics().totalTokens) },
+    { label: "context.stats.usageFreshTokens", value: () => formatter().number(metrics().usage.fresh) },
+    { label: "context.stats.usageCacheInclusiveTokens", value: () => formatter().number(metrics().usage.cacheInclusive) },
+    { label: "context.stats.usageInputTokens", value: () => formatter().number(metrics().usage.input) },
+    { label: "context.stats.usageOutputTokens", value: () => formatter().number(metrics().usage.output) },
+    { label: "context.stats.usageReasoningTokens", value: () => formatter().number(metrics().usage.reasoning) },
+    { label: "context.stats.usageCacheReadTokens", value: () => formatter().number(metrics().usage.cacheRead) },
+    { label: "context.stats.usageCacheWriteTokens", value: () => formatter().number(metrics().usage.cacheWrite) },
+    { label: "context.stats.totalExecutionTime", value: () => formatter().duration(metrics().totalExecutionMs) },
+    { label: "context.stats.totalCost", value: cost },
   ] satisfies { label: string; value: () => JSX.Element }[]
 
   let scroll: HTMLDivElement | undefined
@@ -356,6 +366,15 @@ export function SessionContextTab() {
             </div>
           </div>
         </Show>
+
+        <div class="flex flex-col gap-2">
+          <div class="text-12-regular text-text-weak">{language.t("context.stats.totals")}</div>
+          <div class="grid grid-cols-1 @[32rem]:grid-cols-2 gap-4">
+            <For each={totalStats}>
+              {(stat) => <Stat label={language.t(stat.label as Parameters<typeof language.t>[0])} value={stat.value()} />}
+            </For>
+          </div>
+        </div>
 
         <Show when={breakdown().length > 0}>
           <div class="flex flex-col gap-2">

@@ -381,9 +381,17 @@ export const dict = {
   "context.stats.messages": "Messages",
   "context.stats.provider": "Provider",
   "context.stats.model": "Model",
+  "context.stats.totals": "Totals",
   "context.stats.limit": "Context Limit",
   "context.stats.currentContextTokens": "Current Context Tokens",
   "context.stats.totalTokens": "Total Tokens",
+  "context.stats.usageFreshTokens": "Usage Tokens (fresh)",
+  "context.stats.usageCacheInclusiveTokens": "Usage Tokens (cache-inclusive)",
+  "context.stats.usageInputTokens": "Usage Input Tokens",
+  "context.stats.usageOutputTokens": "Usage Output Tokens",
+  "context.stats.usageReasoningTokens": "Usage Reasoning Tokens",
+  "context.stats.usageCacheReadTokens": "Usage Cache Read Tokens",
+  "context.stats.usageCacheWriteTokens": "Usage Cache Write Tokens",
   "context.stats.totalExecutionTime": "Total Execution Time",
   "context.stats.subagents": "Subagents",
   "context.stats.totalSubagents": "Total Subagents",
@@ -734,6 +742,7 @@ export const dict = {
 
   "settings.general.section.appearance": "Appearance",
   "settings.general.section.advanced": "Advanced",
+  "settings.general.section.advancedMetrics": "Advanced metrics",
   "settings.general.section.notifications": "System notifications",
   "settings.general.section.updates": "Updates",
   "settings.general.section.sounds": "Sound effects",
@@ -784,6 +793,9 @@ export const dict = {
   "settings.general.row.showSessionProgressBar.title": "Show session progress bar",
   "settings.general.row.showSessionProgressBar.description":
     "Display the animated progress bar at the top of the session when the agent is working",
+  "settings.general.row.logUsageMetrics.title": "Log usage metrics",
+  "settings.general.row.logUsageMetrics.description":
+    "Write context, token, cost, timing, model, and subagent metrics to local JSON Lines files",
 
   "settings.general.row.wayland.title": "Use native Wayland",
   "settings.general.row.wayland.description": "Disable X11 fallback on Wayland. Requires restart.",

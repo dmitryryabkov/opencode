@@ -32,16 +32,29 @@ type Context = {
 type Metrics = {
   totalCost: number
   context: Context | undefined
+  usage: UsageTotals
   subagents: {
     sessionID: string
+    parentSessionID: string
     title: string
     agent?: string
+    depth: number
     tokens: number
     executionMs: number
   }[]
   subagentTokens: number
   totalTokens: number
   totalExecutionMs: number
+}
+
+type UsageTotals = {
+  input: number
+  output: number
+  reasoning: number
+  cacheRead: number
+  cacheWrite: number
+  fresh: number
+  cacheInclusive: number
 }
 
 type Input = {
@@ -53,6 +66,43 @@ type Input = {
 
 const tokenTotal = (msg: AssistantMessage) => {
   return msg.tokens.input + msg.tokens.output + msg.tokens.reasoning + msg.tokens.cache.read + msg.tokens.cache.write
+}
+
+const emptyUsage = (): UsageTotals => ({
+  input: 0,
+  output: 0,
+  reasoning: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  fresh: 0,
+  cacheInclusive: 0,
+})
+
+const addUsage = (target: UsageTotals, next: UsageTotals) => {
+  target.input += next.input
+  target.output += next.output
+  target.reasoning += next.reasoning
+  target.cacheRead += next.cacheRead
+  target.cacheWrite += next.cacheWrite
+  target.fresh += next.fresh
+  target.cacheInclusive += next.cacheInclusive
+  return target
+}
+
+const messageUsage = (messages: Message[]) => {
+  return messages.reduce((sum, msg) => {
+    if (msg.role !== "assistant") return sum
+    const usage = {
+      input: msg.tokens.input,
+      output: msg.tokens.output,
+      reasoning: msg.tokens.reasoning,
+      cacheRead: msg.tokens.cache.read,
+      cacheWrite: msg.tokens.cache.write,
+      fresh: msg.tokens.input + msg.tokens.output + msg.tokens.reasoning,
+      cacheInclusive: tokenTotal(msg),
+    }
+    return addUsage(sum, usage)
+  }, emptyUsage())
 }
 
 const isCompaction = (msg: AssistantMessage) => {
@@ -135,8 +185,10 @@ const childTokens = (input: Input) => {
     const messages = inputMessages(input, session.id)
     return {
       sessionID: session.id,
+      parentSessionID: input.sessionID!,
       title: session.title,
       agent: session.agent,
+      depth: 1,
       tokens: sessionTokens(messages),
       executionMs: assistantExecutionMs(messages),
     }
@@ -150,6 +202,10 @@ const build = (messages: Message[] = [], providers: Provider[] = [], children?: 
   const message = lastAssistantWithTokens(messages)
   const subagents = childTokens(children ?? {})
   const subagentTokens = subagents.reduce((sum, item) => sum + item.tokens, 0)
+  const subagentUsage = childSessions(children ?? {}).reduce(
+    (sum, session) => addUsage(sum, messageUsage(inputMessages(children, session.id))),
+    emptyUsage(),
+  )
   const subagentCost = childSessions(children ?? {}).reduce(
     (sum, session) => sum + sessionCost(inputMessages(children, session.id)),
     0,
@@ -157,7 +213,8 @@ const build = (messages: Message[] = [], providers: Provider[] = [], children?: 
   const totalCost = sessionCost(rootMessages) + subagentCost
   const totalExecutionMs = assistantExecutionMs(rootMessages)
   const totalTokens = sessionTokens(rootMessages) + subagentTokens
-  if (!message) return { totalCost, context: undefined, subagents, subagentTokens, totalTokens, totalExecutionMs }
+  const usage = addUsage(messageUsage(rootMessages), subagentUsage)
+  if (!message) return { totalCost, context: undefined, usage, subagents, subagentTokens, totalTokens, totalExecutionMs }
 
   const provider = providers.find((item) => item.id === message.providerID)
   const model = provider?.models[message.modelID]
@@ -166,6 +223,7 @@ const build = (messages: Message[] = [], providers: Provider[] = [], children?: 
 
   return {
     totalCost,
+    usage,
     subagents,
     subagentTokens,
     totalTokens,

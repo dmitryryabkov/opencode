@@ -70,6 +70,70 @@ export const RevertPayload = Schema.Struct(Struct.omit(SessionRevert.RevertInput
 export const PermissionResponsePayload = Schema.Struct({
   response: Permission.Reply,
 })
+export const ContextMetricsPayload = Schema.Struct({
+  schema: Schema.Literal("opencode.context_metrics.v1"),
+  time: Schema.Struct({
+    created: Schema.String,
+    epochMs: Schema.Number,
+  }),
+  project: Schema.Struct({
+    id: Schema.String,
+    directory: Schema.String,
+    workspaceID: Schema.optional(Schema.String),
+  }),
+  session: Schema.Struct({
+    id: SessionID,
+    title: Schema.String,
+    created: Schema.Number,
+    lastActivity: Schema.Number,
+  }),
+  context: Schema.Struct({
+    provider: Schema.optional(Schema.String),
+    providerID: Schema.optional(Schema.String),
+    model: Schema.optional(Schema.String),
+    modelID: Schema.optional(Schema.String),
+    limit: Schema.optional(Schema.Number),
+    usagePercent: Schema.NullOr(Schema.Number),
+    currentContextTokens: Schema.Number,
+    inputTokens: Schema.Number,
+    outputTokens: Schema.Number,
+    reasoningTokens: Schema.Number,
+    cacheReadTokens: Schema.Number,
+    cacheWriteTokens: Schema.Number,
+  }),
+  totals: Schema.Struct({
+    messages: Schema.Number,
+    userMessages: Schema.Number,
+    assistantMessages: Schema.Number,
+    tokens: Schema.Number,
+    usage: Schema.Struct({
+      inputTokens: Schema.Number,
+      outputTokens: Schema.Number,
+      reasoningTokens: Schema.Number,
+      cacheReadTokens: Schema.Number,
+      cacheWriteTokens: Schema.Number,
+      freshTokens: Schema.Number,
+      cacheInclusiveTokens: Schema.Number,
+    }),
+    costUsd: Schema.Number,
+    executionMs: Schema.Number,
+  }),
+  subagents: Schema.Struct({
+    count: Schema.Number,
+    tokens: Schema.Number,
+    items: Schema.Array(
+      Schema.Struct({
+        sessionID: SessionID,
+        parentSessionID: SessionID,
+        title: Schema.String,
+        agent: Schema.optional(Schema.String),
+        depth: Schema.Number,
+        tokens: Schema.Number,
+        executionMs: Schema.Number,
+      }),
+    ),
+  }),
+})
 
 export const SessionPaths = {
   list: root,
@@ -77,6 +141,7 @@ export const SessionPaths = {
   get: `${root}/:sessionID`,
   children: `${root}/:sessionID/children`,
   todo: `${root}/:sessionID/todo`,
+  metrics: `${root}/:sessionID/metrics`,
   diff: `${root}/:sessionID/diff`,
   messages: `${root}/:sessionID/message`,
   message: `${root}/:sessionID/message/:messageID`,
@@ -159,6 +224,19 @@ export const SessionApi = HttpApi.make("session")
             identifier: "session.todo",
             summary: "Get session todos",
             description: "Retrieve the todo list associated with a specific session, showing tasks and action items.",
+          }),
+        ),
+        HttpApiEndpoint.post("metrics", SessionPaths.metrics, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          payload: ContextMetricsPayload,
+          success: described(Schema.Boolean, "Successfully logged context metrics"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.metrics",
+            summary: "Log context metrics",
+            description: "Append a context metrics snapshot for a session to the local JSON Lines metrics log.",
           }),
         ),
         HttpApiEndpoint.get("diff", SessionPaths.diff, {

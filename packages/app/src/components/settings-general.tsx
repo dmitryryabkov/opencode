@@ -458,6 +458,23 @@ export const SettingsGeneral: Component = () => {
     </div>
   )
 
+  const AdvancedMetricsSection = () => (
+    <div class="flex flex-col gap-1">
+      <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.advancedMetrics")}</h3>
+
+      <SettingsList>
+        <SettingsRow
+          title={language.t("settings.general.row.logUsageMetrics.title")}
+          description={language.t("settings.general.row.logUsageMetrics.description")}
+        >
+          <div data-action="settings-log-usage-metrics">
+            <Switch checked={settings.metrics.logUsage()} onChange={(checked) => settings.metrics.setLogUsage(checked)} />
+          </div>
+        </SettingsRow>
+      </SettingsList>
+    </div>
+  )
+
   const AppearanceSection = () => (
     <div class="flex flex-col gap-1">
       <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.appearance")}</h3>
@@ -748,6 +765,8 @@ export const SettingsGeneral: Component = () => {
         <SoundsSection />
 
         <UpdatesSection />
+
+        <AdvancedMetricsSection />
 
         <Show when={linux()}>
           <div class="flex flex-col gap-1">

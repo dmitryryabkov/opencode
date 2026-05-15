@@ -13,9 +13,12 @@ import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
 import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
+import { Global } from "@opencode-ai/core/global"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Cause, Effect, Option, Schema, Scope } from "effect"
+import fs from "node:fs/promises"
+import path from "node:path"
 import * as Stream from "effect/Stream"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder, HttpApiError, HttpApiSchema } from "effect/unstable/httpapi"
@@ -27,6 +30,7 @@ import {
   InitPayload,
   ListQuery,
   MessagesQuery,
+  ContextMetricsPayload,
   PermissionResponsePayload,
   PromptPayload,
   RevertPayload,
@@ -92,6 +96,25 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const todo = Effect.fn("SessionHttpApi.todo")(function* (ctx: { params: { sessionID: SessionID } }) {
       yield* requireSession(ctx.params.sessionID)
       return yield* todoSvc.get(ctx.params.sessionID)
+    })
+
+    const metrics = Effect.fn("SessionHttpApi.metrics")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof ContextMetricsPayload.Type
+    }) {
+      yield* requireSession(ctx.params.sessionID)
+      if (ctx.payload.session.id !== ctx.params.sessionID) return yield* new HttpApiError.BadRequest({})
+
+      const dir = path.join(Global.Path.data, "metrics", "sessions")
+      const file = path.join(dir, `${ctx.params.sessionID}.jsonl`)
+      yield* Effect.tryPromise({
+        try: async () => {
+          await fs.mkdir(dir, { recursive: true })
+          await fs.appendFile(file, `${JSON.stringify(ctx.payload)}\n`, "utf8")
+        },
+        catch: () => new HttpApiError.BadRequest({}),
+      })
+      return true
     })
 
     const diff = Effect.fn("SessionHttpApi.diff")(function* (ctx: {
@@ -401,6 +424,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("get", get)
       .handle("children", children)
       .handle("todo", todo)
+      .handle("metrics", metrics)
       .handle("diff", diff)
       .handle("messages", messages)
       .handle("message", message)

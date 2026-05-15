@@ -36,6 +36,9 @@ export interface Settings {
   updates: {
     startup: boolean
   }
+  metrics: {
+    logUsage: boolean
+  }
   appearance: {
     fontSize: number
     mono: string
@@ -120,6 +123,9 @@ const defaultSettings: Settings = {
   },
   updates: {
     startup: true,
+  },
+  metrics: {
+    logUsage: true,
   },
   appearance: {
     fontSize: 14,
@@ -241,6 +247,12 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         startup: withFallback(() => store.updates?.startup, defaultSettings.updates.startup),
         setStartup(value: boolean) {
           setStore("updates", "startup", value)
+        },
+      },
+      metrics: {
+        logUsage: withFallback(() => store.metrics?.logUsage, defaultSettings.metrics.logUsage),
+        setLogUsage(value: boolean) {
+          setStore("metrics", "logUsage", value)
         },
       },
       appearance: {
