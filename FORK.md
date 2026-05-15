@@ -2,6 +2,8 @@
 
 This fork keeps GitHub automation intentionally small. The only workflow is `.github/workflows/sync-upstream.yml`, which checks the canonical OpenCode repository and opens a pull request when upstream `dev` has changes.
 
+The sync workflow intentionally restores `.github` from this fork after every upstream merge. Upstream GitHub workflows, issue templates, and repository metadata are not imported.
+
 ## Remotes
 
 - `origin`: `https://github.com/dmitryryabkov/opencode.git`

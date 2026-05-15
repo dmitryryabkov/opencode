@@ -59,6 +59,11 @@ jobs:
             exit 1
           fi
 
+          # This fork owns its GitHub metadata. Keep upstream workflow and issue
+          # automation out of sync branches so GITHUB_TOKEN does not need the
+          # workflow scope and the fork does not re-enable upstream automation.
+          git restore --source "origin/${BASE_REF}" --staged --worktree .github
+
           if git diff --quiet "origin/${BASE_REF}..HEAD"; then
             echo "No upstream changes to sync."
             exit 0
