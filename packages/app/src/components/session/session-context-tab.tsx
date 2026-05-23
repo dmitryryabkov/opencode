@@ -159,8 +159,8 @@ export function SessionContextTab() {
       }),
   )
 
-  const metrics = createMemo(() =>
-    getSessionContextMetrics(messages(), providers.all(), {
+ const metrics = createMemo(() =>
+    getSessionContextMetrics(messages(), [...providers.all().values()], {
       sessionID: params.id,
       sessions: [...sync.data.session, ...(subagents() ?? [])],
       messages: sync.data.message,
