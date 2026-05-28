@@ -209,6 +209,30 @@ test("loads JSON config file", async () => {
   })
 })
 
+test("parses experimental estimated cost config", () => {
+  const config = ConfigParse.schema(
+    Config.Info,
+    {
+      experimental: {
+        estimatedCost: {
+          enabled: true,
+          label: "Estimated Cost",
+          pricing: {
+            input: 0.000005,
+            output: 0.00003,
+            cache_read: 0.0000005,
+            cache_write: 0,
+          },
+        },
+      },
+    },
+    "test",
+  )
+
+  expect(config.experimental?.estimatedCost?.enabled).toBe(true)
+  expect(config.experimental?.estimatedCost?.pricing?.input).toBe(0.000005)
+})
+
 test("loads shell config field", async () => {
   await using tmp = await tmpdir({
     init: async (dir) => {

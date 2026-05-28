@@ -15,6 +15,7 @@ Persist Context panel metrics in a format that is easy for humans to inspect and
 - Logs must exclude Raw Messages.
 - Metrics logging must be enabled by default.
 - The settings UI should expose metrics logging under an `Advanced metrics` group.
+- The `Advanced metrics` group should also contain follow-on controls for the same feature, starting with `Use estimates`.
 
 ## Proposed Storage
 
@@ -225,14 +226,17 @@ Add a new settings UI group named `Advanced metrics`.
 
 Add a toggle named `Log usage metrics`.
 
+Add a second toggle named `Use estimates` below `Log usage metrics`. This controls the automatic pre-execution estimation step described in `automatic-estimation-pre-execution.md`.
+
 Behavior:
 
 - Enabled by default.
 - Controls whether metrics snapshots are written to local JSONL files.
+- Estimation events should append to the same per-session JSONL files when both logging and estimates are enabled.
 - Does not include a custom directory picker for the prototype.
 - Does not include an `Open metrics folder` action for the prototype.
 
-This group is expected to grow later with prediction-related toggles and additional advanced metrics controls.
+This group owns Advanced Metrics as one feature: usage snapshots now, estimates as the next step, and additional advanced metrics controls later.
 
 ## Analysis Direction
 

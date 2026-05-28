@@ -15,7 +15,7 @@ import type { Message, Part, UserMessage } from "@opencode-ai/sdk/v2/client"
 import { useLanguage } from "@/context/language"
 import { useProviders } from "@/hooks/use-providers"
 import { useSessionLayout } from "@/pages/session/session-layout"
-import { getSessionContextMetrics } from "./session-context-metrics"
+import { getSessionContextMetrics, type EstimatedCostPricing } from "./session-context-metrics"
 import { loadSessionContextMessages, sessionContextHistoryInput } from "./session-context-metrics-data"
 import { estimateSessionContextBreakdown, type SessionContextBreakdownKey } from "./session-context-breakdown"
 import { createSessionContextFormatter } from "./session-context-format"
@@ -27,6 +27,8 @@ const BREAKDOWN_COLOR: Record<SessionContextBreakdownKey, string> = {
   tool: "var(--syntax-warning)",
   other: "var(--syntax-comment)",
 }
+
+type StatItem = { label: string; value: () => JSX.Element; customLabel?: boolean }
 
 function Stat(props: { label: string; value: JSX.Element }) {
   return (
@@ -160,18 +162,45 @@ export function SessionContextTab() {
   )
 
   const metrics = createMemo(() =>
-    getSessionContextMetrics(messages(), providers.all(), {
-      sessionID: params.id,
-      sessions: [...sync.data.session, ...(subagents() ?? [])],
-      messages: sync.data.message,
-      histories: histories(),
-    }),
+      getSessionContextMetrics(messages(), providers.all(), {
+        sessionID: params.id,
+        sessions: [...sync.data.session, ...(subagents() ?? [])],
+        messages: sync.data.message,
+        parts: sync.data.part,
+        histories: histories(),
+      }),
   )
   const ctx = createMemo(() => metrics().context)
   const formatter = createMemo(() => createSessionContextFormatter(language.intl()))
 
   const cost = createMemo(() => {
     return usd().format(metrics().totalCost)
+  })
+
+  const estimatedCostConfig = createMemo(() => sync.data.config.experimental?.estimatedCost)
+  const estimatedCost = createMemo(() => {
+    const config = estimatedCostConfig()
+    if (config?.enabled !== true) return undefined
+    const current = metrics()
+    if (current.usage.cacheInclusive <= 0) return undefined
+    return current.estimatedCost(config.pricing as EstimatedCostPricing | undefined)
+  })
+
+  const estimatedCostLabel = createMemo(() => {
+    const label = estimatedCostConfig()?.label?.trim()
+    return label || "Estimated Cost"
+  })
+
+  const formattedEstimatedCost = createMemo(() => {
+    const value = estimatedCost()
+    if (value === undefined) return undefined
+    const digits = Math.abs(value) < 0.01 ? 4 : 2
+    return new Intl.NumberFormat(language.intl(), {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    }).format(value)
   })
 
   const counts = createMemo(() => {
@@ -248,21 +277,29 @@ export function SessionContextTab() {
     { label: "context.stats.assistantMessages", value: () => counts().assistant.toLocaleString(language.intl()) },
     { label: "context.stats.sessionCreated", value: () => formatter().time(info()?.time.created) },
     { label: "context.stats.lastActivity", value: () => formatter().time(ctx()?.message.time.created) },
-  ] satisfies { label: string; value: () => JSX.Element }[]
+  ] satisfies StatItem[]
 
-  const totalStats = [
-    { label: "context.stats.currentContextTokens", value: () => formatter().number(ctx()?.total) },
-    { label: "context.stats.totalTokens", value: () => formatter().number(metrics().totalTokens) },
-    { label: "context.stats.usageFreshTokens", value: () => formatter().number(metrics().usage.fresh) },
-    { label: "context.stats.usageCacheInclusiveTokens", value: () => formatter().number(metrics().usage.cacheInclusive) },
-    { label: "context.stats.usageInputTokens", value: () => formatter().number(metrics().usage.input) },
-    { label: "context.stats.usageOutputTokens", value: () => formatter().number(metrics().usage.output) },
-    { label: "context.stats.usageReasoningTokens", value: () => formatter().number(metrics().usage.reasoning) },
-    { label: "context.stats.usageCacheReadTokens", value: () => formatter().number(metrics().usage.cacheRead) },
-    { label: "context.stats.usageCacheWriteTokens", value: () => formatter().number(metrics().usage.cacheWrite) },
-    { label: "context.stats.totalExecutionTime", value: () => formatter().duration(metrics().totalExecutionMs) },
-    { label: "context.stats.totalCost", value: cost },
-  ] satisfies { label: string; value: () => JSX.Element }[]
+  const totalStats = createMemo(() => {
+    const result: StatItem[] = [
+      { label: "context.stats.currentContextTokens", value: () => formatter().number(ctx()?.total) },
+      { label: "context.stats.totalTokens", value: () => formatter().number(metrics().totalTokens) },
+      { label: "context.stats.usageFreshTokens", value: () => formatter().number(metrics().usage.fresh) },
+      { label: "context.stats.usageCacheInclusiveTokens", value: () => formatter().number(metrics().usage.cacheInclusive) },
+      { label: "context.stats.toolCycles", value: () => formatter().number(metrics().toolCycles) },
+      { label: "context.stats.usageInputTokens", value: () => formatter().number(metrics().usage.input) },
+      { label: "context.stats.usageOutputTokens", value: () => formatter().number(metrics().usage.output) },
+      { label: "context.stats.usageReasoningTokens", value: () => formatter().number(metrics().usage.reasoning) },
+      { label: "context.stats.usageCacheReadTokens", value: () => formatter().number(metrics().usage.cacheRead) },
+      { label: "context.stats.usageCacheWriteTokens", value: () => formatter().number(metrics().usage.cacheWrite) },
+      { label: "context.stats.totalExecutionTime", value: () => formatter().duration(metrics().totalExecutionMs) },
+      { label: "context.stats.totalCost", value: cost },
+    ]
+    const estimate = formattedEstimatedCost()
+    if (estimate !== undefined) {
+      result.push({ label: estimatedCostLabel(), value: () => estimate, customLabel: true })
+    }
+    return result
+  })
 
   let scroll: HTMLDivElement | undefined
   let frame: number | undefined
@@ -370,8 +407,13 @@ export function SessionContextTab() {
         <div class="flex flex-col gap-2">
           <div class="text-12-regular text-text-weak">{language.t("context.stats.totals")}</div>
           <div class="grid grid-cols-1 @[32rem]:grid-cols-2 gap-4">
-            <For each={totalStats}>
-              {(stat) => <Stat label={language.t(stat.label as Parameters<typeof language.t>[0])} value={stat.value()} />}
+            <For each={totalStats()}>
+              {(stat) => (
+                <Stat
+                  label={stat.customLabel ? stat.label : language.t(stat.label as Parameters<typeof language.t>[0])}
+                  value={stat.value()}
+                />
+              )}
             </For>
           </div>
         </div>

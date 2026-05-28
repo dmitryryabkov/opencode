@@ -32,6 +32,35 @@ export function provider(model: Provider.Model) {
   return [PROMPT_DEFAULT]
 }
 
+const ESTIMATION_INSTRUCTIONS = [
+  "## Automatic Task Estimates",
+  "",
+  "Before code-editing tools, shell commands, subagent calls, live API calls, builds, tests, installs, migrations, or other execution actions for each new user task, decide whether a task estimate is needed.",
+  "Before logging any estimate_logged event, use the estimation guidance supplied by configured instruction files as mandatory estimation instructions. Do not read a project-specific estimation guidance file unless the user explicitly asks you to.",
+  "Use the task_estimation tool to log an estimate_classified event before execution. If an estimate is needed, show the estimate in chat, then log estimate_logged before any other execution tool use. Continue automatically after showing the estimate; do not wait for confirmation.",
+  "Require an estimate when the task is moderate or complex, likely touches multiple files, involves verification commands, combines backend plus frontend work, changes APIs/config/schema/prompts, likely uses a subagent, needs live API calls/builds/tests/migrations/dependency installs, is expected to take over 5 minutes, is expected to need over 10 assistant/model calls, or the user explicitly asks for an estimate.",
+  "Skip the structured estimate only for tiny focused edits in known files or small areas with minimal ambiguity, no expected subagent use, no build/test suite/migration/install/live API call, at most inspection or a very quick focused command, expected wall-clock time of 5 minutes or less, expected assistant/model calls of 10 or fewer, and no explicit user estimate request. When skipped, log only estimate_classified and do not mention the skip in chat.",
+  "Use task classes tiny_focused_edit, small_implementation, moderate_implementation, or complex_integration. If uncertain, choose estimate_needed true.",
+  "Use this user-facing estimate format when an estimate is needed:",
+  "Task class: tiny / small / moderate / complex",
+  "",
+  "Wall-clock: X-Y minutes",
+  "Assistant turns/model calls: X-Y",
+  "Tool cycles: X-Y",
+  "Fresh tokens: X-Y",
+  "Cache-read-inclusive tokens: X-Y, if cached context is reused",
+  "",
+  "Assumes:",
+  "- subagents: none / N",
+  "- verification: none / focused test / typecheck / full test suite / build / manual check",
+  "- slow commands: none / list",
+  "",
+  "Main uncertainty:",
+  "The biggest unknown that could materially change this estimate.",
+  "",
+  "Do not include raw prompt text, tool inputs, tool outputs, file contents, diffs, or stack traces in task_estimation payloads.",
+].join("\n")
+
 export interface Interface {
   readonly environment: (model: Provider.Model) => Effect.Effect<string[]>
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
@@ -58,6 +87,7 @@ export const layer = Layer.effect(
             `  Platform: ${process.platform}`,
             `  Today's date: ${new Date().toDateString()}`,
             `</env>`,
+            ESTIMATION_INSTRUCTIONS,
           ].join("\n"),
         ]
       }),

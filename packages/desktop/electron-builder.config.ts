@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process"
+import { existsSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
@@ -8,6 +9,7 @@ import type { Configuration } from "electron-builder"
 const execFileAsync = promisify(execFile)
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const signScript = path.join(rootDir, "script", "sign-windows.ps1")
+const nativeDir = path.join(rootDir, "packages", "desktop", "native")
 
 async function signWindows(configuration: { path: string }) {
   if (process.platform !== "win32") return
@@ -22,7 +24,7 @@ async function signWindows(configuration: { path: string }) {
 
 const channel = (() => {
   const raw = process.env.OPENCODE_CHANNEL
-  if (raw === "dev" || raw === "beta" || raw === "prod") return raw
+  if (raw === "dev" || raw === "beta" || raw === "prod" || raw === "dogfood") return raw
   return "dev"
 })()
 
@@ -33,13 +35,15 @@ const getBase = (): Configuration => ({
     buildResources: "resources",
   },
   files: ["out/**/*", "resources/**/*"],
-  extraResources: [
-    {
-      from: "native/",
-      to: "native/",
-      filter: ["index.js", "index.d.ts", "build/Release/mac_window.node", "swift-build/**"],
-    },
-  ],
+  extraResources: existsSync(nativeDir)
+    ? [
+        {
+          from: "native/",
+          to: "native/",
+          filter: ["index.js", "index.d.ts", "build/Release/mac_window.node", "swift-build/**"],
+        },
+      ]
+    : [],
   mac: {
     category: "public.app-category.developer-tools",
     icon: `resources/icons/icon.icns`,
@@ -108,6 +112,16 @@ function getConfig() {
         protocols: { name: "OpenCode", schemes: ["opencode"] },
         publish: { provider: "github", owner: "anomalyco", repo: "opencode", channel: "latest" },
         rpm: { packageName: "opencode" },
+      }
+    }
+    case "dogfood": {
+      return {
+        ...base,
+        appId: "ai.opencode.desktop.dogfood",
+        productName: "OpenCode Dogfood",
+        protocols: { name: "OpenCode Dogfood", schemes: ["opencode-dogfood"] },
+        publish: { provider: "generic", url: "https://opencode.local.invalid", channel: "dogfood" },
+        rpm: { packageName: "opencode-dogfood" },
       }
     }
   }

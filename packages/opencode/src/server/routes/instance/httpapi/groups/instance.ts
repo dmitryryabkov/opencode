@@ -17,8 +17,10 @@ import { described } from "./metadata"
 
 const PathInfo = Schema.Struct({
   home: Schema.String,
+  data: Schema.String,
   state: Schema.String,
   config: Schema.String,
+  metrics: Schema.String,
   worktree: Schema.String,
   directory: Schema.String,
 }).annotate({ identifier: "Path" })

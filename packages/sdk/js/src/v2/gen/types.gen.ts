@@ -1286,6 +1286,16 @@ export type Config = {
     disable_paste_summary?: boolean
     batch_tool?: boolean
     openTelemetry?: boolean
+    estimatedCost?: {
+      enabled?: boolean
+      label?: string
+      pricing?: {
+        input?: number
+        output?: number
+        cache_read?: number
+        cache_write?: number
+      }
+    }
     primary_tools?: Array<string>
     continue_loop_on_deny?: boolean
     mcp_timeout?: number

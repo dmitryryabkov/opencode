@@ -30,7 +30,7 @@ import {
   InitPayload,
   ListQuery,
   MessagesQuery,
-  ContextMetricsPayload,
+  MetricsPayload,
   PermissionResponsePayload,
   PromptPayload,
   RevertPayload,
@@ -100,7 +100,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
 
     const metrics = Effect.fn("SessionHttpApi.metrics")(function* (ctx: {
       params: { sessionID: SessionID }
-      payload: typeof ContextMetricsPayload.Type
+      payload: typeof MetricsPayload.Type
     }) {
       yield* requireSession(ctx.params.sessionID)
       if (ctx.payload.session.id !== ctx.params.sessionID) return yield* new HttpApiError.BadRequest({})

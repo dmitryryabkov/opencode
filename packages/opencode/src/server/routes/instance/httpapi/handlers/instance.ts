@@ -11,6 +11,7 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
 import { ApiVcsApplyError } from "../groups/instance"
 import { markInstanceForDisposal } from "../lifecycle"
+import path from "node:path"
 
 export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance", (handlers) =>
   Effect.gen(function* () {
@@ -30,8 +31,10 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       const ctx = yield* InstanceState.context
       return {
         home: Global.Path.home,
+        data: Global.Path.data,
         state: Global.Path.state,
         config: Global.Path.config,
+        metrics: path.join(Global.Path.data, "metrics", "sessions"),
         worktree: ctx.worktree,
         directory: ctx.directory,
       }

@@ -13,7 +13,7 @@ import contextMenu from "electron-context-menu"
 
 import type { InitStep, ServerReadyData, SqliteMigrationProgress, WslConfig } from "../preload/types"
 import { checkAppExists, resolveAppPath, wslPath } from "./apps"
-import { CHANNEL, UPDATER_ENABLED } from "./constants"
+import { APP_IDS, APP_NAMES, CHANNEL, PROTOCOL_SCHEMES, UPDATER_ENABLED } from "./constants"
 import { registerIpcHandlers, sendDeepLinks, sendMenuCommand, sendSqliteMigrationProgress } from "./ipc"
 import { initLogging } from "./logging"
 import { parseMarkdown } from "./markdown"
@@ -37,17 +37,6 @@ import {
 import { migrate } from "./migrate"
 import { checkUpdate, checkForUpdates, installUpdate, setupAutoUpdater } from "./updater"
 import { Deferred, Effect, Fiber } from "effect"
-
-const APP_NAMES: Record<string, string> = {
-  dev: "OpenCode Dev",
-  beta: "OpenCode Beta",
-  prod: "OpenCode",
-}
-const APP_IDS: Record<string, string> = {
-  dev: "ai.opencode.desktop.dev",
-  beta: "ai.opencode.desktop.beta",
-  prod: "ai.opencode.desktop",
-}
 const TEST_ONBOARDING = process.env.OPENCODE_TEST_ONBOARDING === "1"
 
 let logger: ReturnType<typeof initLogging>
@@ -116,8 +105,12 @@ const main = Effect.gen(function* () {
   } catch {}
 
   process.env.OPENCODE_DISABLE_EMBEDDED_WEB_UI = "true"
+  if (!app.isPackaged && !process.env.OPENCODE_CONFIG_DIR) {
+    process.env.OPENCODE_CONFIG_DIR = join(homedir(), ".config", "opencode")
+  }
 
-  const appId = app.isPackaged ? APP_IDS[CHANNEL] : "ai.opencode.desktop.dev"
+  const appId = APP_IDS[CHANNEL]
+  const protocolScheme = PROTOCOL_SCHEMES[CHANNEL]
   const onboardingTestRoot = ((): string | undefined => {
     if (!TEST_ONBOARDING) return
 
@@ -133,13 +126,20 @@ const main = Effect.gen(function* () {
     process.env.XDG_STATE_HOME = join(root, "state")
     return root
   })()
-  app.setName(app.isPackaged ? APP_NAMES[CHANNEL] : "OpenCode Dev")
+  app.setName(APP_NAMES[CHANNEL])
   app.setAppUserModelId(appId)
   app.setPath(
     "userData",
     onboardingTestRoot ? join(onboardingTestRoot, "desktop") : join(app.getPath("appData"), appId),
   )
   if (onboardingTestRoot) app.setPath("sessionData", join(onboardingTestRoot, "session"))
+  if (CHANNEL === "dogfood" && !onboardingTestRoot) {
+    process.env.XDG_DATA_HOME = join(app.getPath("userData"), "data")
+    process.env.XDG_CONFIG_HOME = join(app.getPath("userData"), "config")
+    process.env.XDG_CACHE_HOME = join(app.getPath("userData"), "cache")
+    process.env.XDG_STATE_HOME = join(app.getPath("userData"), "state")
+    process.env.OPENCODE_DISABLE_PROJECT_CONFIG = "true"
+  }
   logger = initLogging()
 
   try {
@@ -167,7 +167,7 @@ const main = Effect.gen(function* () {
   preferAppEnv(app.getPath("userData"))
 
   app.on("second-instance", (_event: Event, argv: string[]) => {
-    const urls = argv.filter((arg: string) => arg.startsWith("opencode://"))
+    const urls = argv.filter((arg: string) => arg.startsWith(`${protocolScheme}://`))
     if (urls.length) {
       logger.log("deep link received via second-instance", { urls })
       emitDeepLinks(urls)
@@ -241,7 +241,7 @@ const main = Effect.gen(function* () {
   yield* Effect.promise(() => app.whenReady())
 
   if (!TEST_ONBOARDING) migrate()
-  app.setAsDefaultProtocolClient("opencode")
+  app.setAsDefaultProtocolClient(protocolScheme)
   registerRendererProtocol()
   setDockIcon()
   setupAutoUpdater()

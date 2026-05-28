@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import type { AssistantMessage, Message, Session, SessionStatus } from "@opencode-ai/sdk/v2/client"
-import { getSessionContextMetrics } from "./session-context-metrics"
+import type { AssistantMessage, Message, Part, Session, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import { estimateContextCost, getSessionContextMetrics } from "./session-context-metrics"
 import { sessionContextHistoryInput } from "./session-context-metrics-data"
 
 const assistant = (
@@ -46,6 +46,8 @@ const session = (id: string, parentID?: string) => {
 }
 
 const busy = { type: "busy" } as SessionStatus
+
+const toolPart = (id: string) => ({ id, type: "tool" }) as Part
 
 describe("getSessionContextMetrics", () => {
   test("computes totals and usage from latest assistant with tokens", () => {
@@ -125,6 +127,26 @@ describe("getSessionContextMetrics", () => {
     expect(metrics.totalTokens).toBe(205)
     expect(metrics.totalCost).toBe(0.8)
     expect(metrics.totalExecutionMs).toBe(3000)
+  })
+
+  test("counts tool cycles from assistant messages with tool parts", () => {
+    const metrics = getSessionContextMetrics(
+      [assistant("parent_1", { input: 10, output: 5, reasoning: 0, read: 0, write: 0 }, 0.1)],
+      [{ id: "openai", models: {} }],
+      {
+        sessionID: "ses_parent",
+        sessions: [session("ses_parent"), session("ses_child", "ses_parent")],
+        messages: {
+          ses_child: [assistant("child_1", { input: 10, output: 5, reasoning: 0, read: 0, write: 0 }, 0.1)],
+        },
+        parts: {
+          parent_1: [toolPart("tool_parent")],
+          child_1: [toolPart("tool_child")],
+        },
+      },
+    )
+
+    expect(metrics.toolCycles).toBe(2)
   })
 
   test("uses full histories for compacted parent tokens and cost", () => {
@@ -262,6 +284,31 @@ describe("getSessionContextMetrics", () => {
     expect(metrics.subagentTokens).toBe(0)
     expect(metrics.totalTokens).toBe(0)
     expect(metrics.totalExecutionMs).toBe(0)
+  })
+
+  test("estimates cost from separated usage without double-counting cache tokens", () => {
+    const metrics = getSessionContextMetrics([
+      assistant("a1", { input: 1_000, output: 200, reasoning: 50, read: 500, write: 100 }, 99),
+    ])
+
+    expect(
+      metrics.estimatedCost({
+        input: 0.000005,
+        output: 0.00003,
+        cache_read: 0.0000005,
+        cache_write: 0.000001,
+      }),
+    ).toBeCloseTo(0.01135)
+    expect(metrics.totalCost).toBe(99)
+  })
+
+  test("skips estimated cost when required pricing is missing", () => {
+    expect(
+      estimateContextCost(
+        { input: 1, output: 1, reasoning: 0, cacheRead: 1, cacheWrite: 0, fresh: 2, cacheInclusive: 3 },
+        { input: 0.000005, output: 0.00003 },
+      ),
+    ).toBeUndefined()
   })
 })
 

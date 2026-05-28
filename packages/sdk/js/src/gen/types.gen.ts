@@ -1373,6 +1373,16 @@ export type Config = {
      * Enable OpenTelemetry spans for AI SDK calls (using the 'experimental_telemetry' flag)
      */
     openTelemetry?: boolean
+    estimatedCost?: {
+      enabled?: boolean
+      label?: string
+      pricing?: {
+        input?: number
+        output?: number
+        cache_read?: number
+        cache_write?: number
+      }
+    }
     /**
      * Tools that should only be available to primary agents.
      */

@@ -8,6 +8,7 @@ import { SessionRevert } from "@/session/revert"
 import { SessionStatus } from "@/session/status"
 import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
+import { TaskEstimation } from "@/metrics/task-estimation"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import { Snapshot } from "@/snapshot"
 import { Schema, Struct } from "effect"
@@ -134,6 +135,7 @@ export const ContextMetricsPayload = Schema.Struct({
     ),
   }),
 })
+export const MetricsPayload = Schema.Union([ContextMetricsPayload, TaskEstimation.TaskEstimationEvent])
 
 export const SessionPaths = {
   list: root,
@@ -229,14 +231,15 @@ export const SessionApi = HttpApi.make("session")
         HttpApiEndpoint.post("metrics", SessionPaths.metrics, {
           params: { sessionID: SessionID },
           query: WorkspaceRoutingQuery,
-          payload: ContextMetricsPayload,
-          success: described(Schema.Boolean, "Successfully logged context metrics"),
+          payload: MetricsPayload,
+          success: described(Schema.Boolean, "Successfully logged metrics event"),
           error: [HttpApiError.BadRequest, ApiNotFoundError],
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "session.metrics",
-            summary: "Log context metrics",
-            description: "Append a context metrics snapshot for a session to the local JSON Lines metrics log.",
+            summary: "Log metrics event",
+            description:
+              "Append a context metrics snapshot or task estimation event for a session to the local JSON Lines metrics log.",
           }),
         ),
         HttpApiEndpoint.get("diff", SessionPaths.diff, {

@@ -1,8 +1,9 @@
-import type { Message, Session, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { Message, Part, Session, SessionStatus } from "@opencode-ai/sdk/v2/client"
+import type { SessionHistory } from "./session-context-metrics"
 
 type Client = {
   session: {
-    messages(input: { sessionID: string }): Promise<{ data?: { info: Message }[] }>
+    messages(input: { sessionID: string }): Promise<{ data?: { info: Message; parts: Part[] }[] }>
   }
 }
 
@@ -17,7 +18,11 @@ export async function loadSessionContextMessages(input: {
         .filter((sessionID): sessionID is string => !!sessionID)
         .map(async (sessionID) => {
           const response = await input.client.session.messages({ sessionID })
-          return [sessionID, (response.data ?? []).map((message) => message.info)] as const
+          const history: SessionHistory = {
+            messages: (response.data ?? []).map((message) => message.info),
+            parts: Object.fromEntries((response.data ?? []).map((message) => [message.info.id, message.parts])),
+          }
+          return [sessionID, history] as const
         }),
     ),
   )

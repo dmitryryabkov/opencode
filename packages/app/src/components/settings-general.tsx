@@ -177,6 +177,10 @@ export const SettingsGeneral: Component = () => {
 
   const globalSync = useGlobalSync()
   const globalSdk = useGlobalSDK()
+  const metricsLogPath = createMemo(() => {
+    const paths = globalSync.data.path as typeof globalSync.data.path & { data?: string; metrics?: string }
+    return paths.metrics ?? (paths.data ? `${paths.data}/metrics/sessions` : "")
+  })
 
   const [shells] = createResource(
     () =>
@@ -462,13 +466,34 @@ export const SettingsGeneral: Component = () => {
     <div class="flex flex-col gap-1">
       <h3 class="text-14-medium text-text-strong pb-2">{language.t("settings.general.section.advancedMetrics")}</h3>
 
+      <div class="pb-2">
+        <div class="text-12-medium text-text-muted">{language.t("settings.general.metrics.logsLocation.title")}</div>
+        <div class="text-12 text-text-muted break-all" data-testid="settings-metrics-log-location">
+          {metricsLogPath() || language.t("settings.general.metrics.logsLocation.unavailable")}
+        </div>
+      </div>
+
       <SettingsList>
         <SettingsRow
           title={language.t("settings.general.row.logUsageMetrics.title")}
           description={language.t("settings.general.row.logUsageMetrics.description")}
         >
           <div data-action="settings-log-usage-metrics">
-            <Switch checked={settings.metrics.logUsage()} onChange={(checked) => settings.metrics.setLogUsage(checked)} />
+            <Switch
+              checked={settings.metrics.logUsage()}
+              onChange={(checked) => settings.metrics.setLogUsage(checked)}
+            />
+          </div>
+        </SettingsRow>
+        <SettingsRow
+          title={language.t("settings.general.row.useEstimates.title")}
+          description={language.t("settings.general.row.useEstimates.description")}
+        >
+          <div data-action="settings-use-estimates">
+            <Switch
+              checked={settings.metrics.useEstimates()}
+              onChange={(checked) => settings.metrics.setUseEstimates(checked)}
+            />
           </div>
         </SettingsRow>
       </SettingsList>

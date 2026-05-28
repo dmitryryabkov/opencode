@@ -12,6 +12,7 @@ import { useLocal } from "@/context/local"
 import { usePermission } from "@/context/permission"
 import { type ContextItem, type ImageAttachmentPart, type Prompt, usePrompt } from "@/context/prompt"
 import { useSDK } from "@/context/sdk"
+import { useSettings } from "@/context/settings"
 import { useSync } from "@/context/sync"
 import { Identifier } from "@/utils/id"
 import { Worktree as WorktreeState } from "@/utils/worktree"
@@ -34,6 +35,7 @@ export type FollowupDraft = {
   agent: string
   model: { providerID: string; modelID: string }
   variant?: string
+  useEstimates: boolean
 }
 
 type FollowupSendInput = {
@@ -159,6 +161,7 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       messageID,
       parts: requestParts,
       variant: input.draft.variant,
+      ...(input.draft.useEstimates ? {} : { tools: { task_estimation: false } }),
     })
     return true
   } catch (err) {
@@ -211,6 +214,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
   const prompt = usePrompt()
   const layout = useLayout()
   const language = useLanguage()
+  const settings = useSettings()
   const params = useParams()
 
   const errorMessage = (err: unknown) => {
@@ -403,6 +407,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
       agent,
       model,
       variant,
+      useEstimates: settings.metrics.useEstimates(),
     }
 
     const clearInput = () => {

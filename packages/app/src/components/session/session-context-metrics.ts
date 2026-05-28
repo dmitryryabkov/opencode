@@ -1,4 +1,4 @@
-import type { AssistantMessage, Message, Session } from "@opencode-ai/sdk/v2/client"
+import type { AssistantMessage, Message, Part, Session } from "@opencode-ai/sdk/v2/client"
 
 type Provider = {
   id: string
@@ -31,8 +31,10 @@ type Context = {
 
 type Metrics = {
   totalCost: number
+  estimatedCost: (pricing: EstimatedCostPricing | undefined) => number | undefined
   context: Context | undefined
   usage: UsageTotals
+  toolCycles: number
   subagents: {
     sessionID: string
     parentSessionID: string
@@ -47,7 +49,7 @@ type Metrics = {
   totalExecutionMs: number
 }
 
-type UsageTotals = {
+export type UsageTotals = {
   input: number
   output: number
   reasoning: number
@@ -57,11 +59,24 @@ type UsageTotals = {
   cacheInclusive: number
 }
 
+export type EstimatedCostPricing = {
+  input?: number
+  output?: number
+  cache_read?: number
+  cache_write?: number
+}
+
 type Input = {
   sessionID?: string
   sessions?: Session[]
   messages?: Record<string, Message[] | undefined>
-  histories?: Record<string, Message[] | undefined>
+  parts?: Record<string, Part[] | undefined>
+  histories?: Record<string, SessionHistory | Message[] | undefined>
+}
+
+export type SessionHistory = {
+  messages: Message[]
+  parts?: Record<string, Part[] | undefined>
 }
 
 const tokenTotal = (msg: AssistantMessage) => {
@@ -103,6 +118,24 @@ const messageUsage = (messages: Message[]) => {
     }
     return addUsage(sum, usage)
   }, emptyUsage())
+}
+
+const historyMessages = (history: SessionHistory | Message[] | undefined) => {
+  return Array.isArray(history) ? history : history?.messages
+}
+
+const historyParts = (history: SessionHistory | Message[] | undefined) => {
+  return Array.isArray(history) ? undefined : history?.parts
+}
+
+const hasToolPart = (message: Message, parts: Record<string, Part[] | undefined> | undefined) => {
+  if (message.role !== "assistant") return false
+  if (message.summary || message.mode === "compaction") return false
+  return parts?.[message.id]?.some((part) => part.type === "tool") ?? false
+}
+
+const toolCycles = (messages: Message[], parts: Record<string, Part[] | undefined> | undefined) => {
+  return messages.reduce((sum, message) => sum + (hasToolPart(message, parts) ? 1 : 0), 0)
 }
 
 const isCompaction = (msg: AssistantMessage) => {
@@ -158,6 +191,19 @@ const sessionCost = (messages: Message[]) => {
   return messages.reduce((sum, msg) => sum + (msg.role === "assistant" ? msg.cost : 0), 0)
 }
 
+const validPrice = (value: number | undefined): value is number => {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+}
+
+export function estimateContextCost(usage: UsageTotals, pricing: EstimatedCostPricing | undefined) {
+  if (!pricing) return undefined
+  if (!validPrice(pricing.input) || !validPrice(pricing.output) || !validPrice(pricing.cache_read)) return undefined
+
+  // Message token accounting already separates fresh input from cache read/write tokens.
+  const cacheWrite = validPrice(pricing.cache_write) ? pricing.cache_write : 0
+  return usage.input * pricing.input + usage.output * pricing.output + usage.cacheRead * pricing.cache_read + usage.cacheWrite * cacheWrite
+}
+
 const mergeMessages = (history: Message[] | undefined, live: Message[] | undefined) => {
   if (!history?.length) return live ?? []
   if (!live?.length) return history
@@ -170,7 +216,11 @@ const mergeMessages = (history: Message[] | undefined, live: Message[] | undefin
 }
 
 const inputMessages = (input: Input | undefined, sessionID: string) => {
-  return mergeMessages(input?.histories?.[sessionID], input?.messages?.[sessionID])
+  return mergeMessages(historyMessages(input?.histories?.[sessionID]), input?.messages?.[sessionID])
+}
+
+const inputParts = (input: Input | undefined, sessionID: string) => {
+  return { ...historyParts(input?.histories?.[sessionID]), ...input?.parts }
 }
 
 const childSessions = (input: Input) => {
@@ -197,7 +247,7 @@ const childTokens = (input: Input) => {
 
 const build = (messages: Message[] = [], providers: Provider[] = [], children?: Input): Metrics => {
   const rootMessages = children?.sessionID
-    ? mergeMessages(children.histories?.[children.sessionID], children.messages?.[children.sessionID] ?? messages)
+    ? mergeMessages(historyMessages(children.histories?.[children.sessionID]), children.messages?.[children.sessionID] ?? messages)
     : messages
   const message = lastAssistantWithTokens(messages)
   const subagents = childTokens(children ?? {})
@@ -214,7 +264,25 @@ const build = (messages: Message[] = [], providers: Provider[] = [], children?: 
   const totalExecutionMs = assistantExecutionMs(rootMessages)
   const totalTokens = sessionTokens(rootMessages) + subagentTokens
   const usage = addUsage(messageUsage(rootMessages), subagentUsage)
-  if (!message) return { totalCost, context: undefined, usage, subagents, subagentTokens, totalTokens, totalExecutionMs }
+  const rootToolCycles = toolCycles(rootMessages, inputParts(children, children?.sessionID ?? ""))
+  const subagentToolCycles = childSessions(children ?? {}).reduce(
+    (sum, session) => sum + toolCycles(inputMessages(children, session.id), inputParts(children, session.id)),
+    0,
+  )
+  const totalToolCycles = rootToolCycles + subagentToolCycles
+  const estimatedCost = (pricing: EstimatedCostPricing | undefined) => estimateContextCost(usage, pricing)
+  if (!message)
+    return {
+      totalCost,
+      estimatedCost,
+      context: undefined,
+      usage,
+      toolCycles: totalToolCycles,
+      subagents,
+      subagentTokens,
+      totalTokens,
+      totalExecutionMs,
+    }
 
   const provider = providers.find((item) => item.id === message.providerID)
   const model = provider?.models[message.modelID]
@@ -223,7 +291,9 @@ const build = (messages: Message[] = [], providers: Provider[] = [], children?: 
 
   return {
     totalCost,
+    estimatedCost,
     usage,
+    toolCycles: totalToolCycles,
     subagents,
     subagentTokens,
     totalTokens,

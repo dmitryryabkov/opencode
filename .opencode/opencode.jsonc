@@ -3,6 +3,18 @@
   "provider": {},
   "permission": {},
   "mcp": {},
+  "experimental": {
+    "estimatedCost": {
+      "enabled": true,
+      "label": "Total Estimated Cost",
+      "pricing": {
+        "input": 0.000005,
+        "output": 0.00003,
+        "cache_read": 0.0000005,
+        "cache_write": 0,
+      },
+    },
+  },
   "tools": {
     "github-triage": false,
     "github-pr-search": false,

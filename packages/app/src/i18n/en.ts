@@ -387,6 +387,7 @@ export const dict = {
   "context.stats.totalTokens": "Total Tokens",
   "context.stats.usageFreshTokens": "Usage Tokens (fresh)",
   "context.stats.usageCacheInclusiveTokens": "Usage Tokens (cache-inclusive)",
+  "context.stats.toolCycles": "Tool Cycles",
   "context.stats.usageInputTokens": "Usage Input Tokens",
   "context.stats.usageOutputTokens": "Usage Output Tokens",
   "context.stats.usageReasoningTokens": "Usage Reasoning Tokens",
@@ -743,6 +744,8 @@ export const dict = {
   "settings.general.section.appearance": "Appearance",
   "settings.general.section.advanced": "Advanced",
   "settings.general.section.advancedMetrics": "Advanced metrics",
+  "settings.general.metrics.logsLocation.title": "Logs location",
+  "settings.general.metrics.logsLocation.unavailable": "Unavailable until the server reports its data directory",
   "settings.general.section.notifications": "System notifications",
   "settings.general.section.updates": "Updates",
   "settings.general.section.sounds": "Sound effects",
@@ -796,6 +799,9 @@ export const dict = {
   "settings.general.row.logUsageMetrics.title": "Log usage metrics",
   "settings.general.row.logUsageMetrics.description":
     "Write context, token, cost, timing, model, and subagent metrics to local JSON Lines files",
+  "settings.general.row.useEstimates.title": "Use estimates",
+  "settings.general.row.useEstimates.description":
+    "Show and log automatic task estimates before moderate or complex execution starts",
 
   "settings.general.row.wayland.title": "Use native Wayland",
   "settings.general.row.wayland.description": "Disable X11 fallback on Wayland. Requires restart.",

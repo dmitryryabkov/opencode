@@ -278,6 +278,24 @@ export const Info = Schema.Struct({
       openTelemetry: Schema.optional(Schema.Boolean).annotate({
         description: "Enable OpenTelemetry spans for AI SDK calls (using the 'experimental_telemetry' flag)",
       }),
+      estimatedCost: Schema.optional(
+        Schema.Struct({
+          enabled: Schema.optional(Schema.Boolean).annotate({ description: "Show estimated API-equivalent cost" }),
+          label: Schema.optional(Schema.String).annotate({ description: "Label for the estimated cost metric" }),
+          pricing: Schema.optional(
+            Schema.Struct({
+              input: Schema.optional(Schema.Number).annotate({ description: "Input token price in USD per token" }),
+              output: Schema.optional(Schema.Number).annotate({ description: "Output token price in USD per token" }),
+              cache_read: Schema.optional(Schema.Number).annotate({
+                description: "Cache read token price in USD per token",
+              }),
+              cache_write: Schema.optional(Schema.Number).annotate({
+                description: "Cache write token price in USD per token",
+              }),
+            }),
+          ),
+        }),
+      ).annotate({ description: "Experimental UI-only estimated cost metric" }),
       primary_tools: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
         description: "Tools that should only be available to primary agents.",
       }),

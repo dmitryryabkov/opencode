@@ -38,6 +38,7 @@ export interface Settings {
   }
   metrics: {
     logUsage: boolean
+    useEstimates: boolean
   }
   appearance: {
     fontSize: number
@@ -126,6 +127,7 @@ const defaultSettings: Settings = {
   },
   metrics: {
     logUsage: true,
+    useEstimates: true,
   },
   appearance: {
     fontSize: 14,
@@ -253,6 +255,10 @@ export const { use: useSettings, provider: SettingsProvider } = createSimpleCont
         logUsage: withFallback(() => store.metrics?.logUsage, defaultSettings.metrics.logUsage),
         setLogUsage(value: boolean) {
           setStore("metrics", "logUsage", value)
+        },
+        useEstimates: withFallback(() => store.metrics?.useEstimates, defaultSettings.metrics.useEstimates),
+        setUseEstimates(value: boolean) {
+          setStore("metrics", "useEstimates", value)
         },
       },
       appearance: {
