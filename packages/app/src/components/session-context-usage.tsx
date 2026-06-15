@@ -48,22 +48,22 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
     pathFromTab: file.pathFromTab,
     normalizeTab: (tab) => (tab.startsWith("file://") ? file.tab(tab) : tab),
   })
-  const messages = createMemo(() => (params.id ? (sync.data.message[params.id] ?? []) : []))
+  const messages = createMemo(() => (params.id ? (sync().data.message[params.id] ?? []) : []))
   const [subagents] = createResource(
     () => params.id,
     async (sessionID) => (await sdk.client.session.children({ sessionID })).data ?? [],
   )
 
   createEffect(() => {
-    for (const subagent of subagents() ?? []) void sync.session.sync(subagent.id)
+    for (const subagent of subagents() ?? []) void sync().session.sync(subagent.id)
   })
   const [histories] = createResource(
     () =>
       sessionContextHistoryInput({
         sessionID: params.id,
         childSessions: subagents(),
-        messages: sync.data.message,
-        statuses: sync.data.session_status,
+        messages: sync().data.message,
+        statuses: sync().data.session_status,
       }),
     (input) =>
       loadSessionContextMessages({
@@ -81,11 +81,11 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
       }),
   )
 
- const metrics = createMemo(() =>
+  const metrics = createMemo(() =>
     getSessionContextMetrics(messages(), [...providers.all().values()], {
       sessionID: params.id,
-      sessions: [...sync.data.session, ...(subagents() ?? [])],
-      messages: sync.data.message,
+      sessions: [...sync().data.session, ...(subagents() ?? [])],
+      messages: sync().data.message,
       histories: histories(),
     }),
   )
