@@ -8,8 +8,8 @@ import { same } from "@/utils/same"
 import { Icon } from "@opencode-ai/ui/icon"
 import { Accordion } from "@opencode-ai/ui/accordion"
 import { StickyAccordionHeader } from "@opencode-ai/ui/sticky-accordion-header"
-import { File } from "@opencode-ai/ui/file"
-import { Markdown } from "@opencode-ai/ui/markdown"
+import { File } from "@opencode-ai/session-ui/file"
+import { Markdown } from "@opencode-ai/session-ui/markdown"
 import { ScrollView } from "@opencode-ai/ui/scroll-view"
 import type { Message, Part, UserMessage } from "@opencode-ai/sdk/v2/client"
 import { useLanguage } from "@/context/language"
@@ -96,7 +96,7 @@ export function SessionContextTab() {
   const sync = useSync()
   const sdk = useSDK()
   const language = useLanguage()
-  const providers = useProviders()
+  const providers = useProviders(() => sdk().directory)
   const { params, view } = useSessionLayout()
 
   const info = createMemo(() => (params.id ? sync().session.get(params.id) : undefined))
@@ -113,23 +113,23 @@ export function SessionContextTab() {
 
   const [subagents] = createResource(
     () => params.id,
-    async (sessionID) => (await sdk.client.session.children({ sessionID })).data ?? [],
+    async (sessionID) => (await sdk().client.session.children({ sessionID })).data ?? [],
   )
 
   createEffect(() => {
-    for (const subagent of subagents() ?? []) void sync.session.sync(subagent.id)
+    for (const subagent of subagents() ?? []) void sync().session.sync(subagent.id)
   })
   const [histories] = createResource(
     () =>
       sessionContextHistoryInput({
         sessionID: params.id,
         childSessions: subagents(),
-        messages: sync.data.message,
-        statuses: sync.data.session_status,
+        messages: sync().data.message,
+        statuses: sync().data.session_status,
       }),
     (input) =>
       loadSessionContextMessages({
-        client: sdk.client,
+        client: sdk().client,
         sessionID: input.sessionID,
         childSessions: input.childSessions,
       }),
@@ -159,19 +159,20 @@ export function SessionContextTab() {
       }),
   )
 
- const metrics = createMemo(() =>
+  const metrics = createMemo(() =>
     getSessionContextMetrics(messages(), [...providers.all().values()], {
       sessionID: params.id,
-      sessions: [...sync.data.session, ...(subagents() ?? [])],
-      messages: sync.data.message,
+      sessions: [...sync().data.session, ...(subagents() ?? [])],
+      messages: sync().data.message,
       histories: histories(),
     }),
   )
   const ctx = createMemo(() => metrics().context)
+  const tokens = createMemo(() => info()?.tokens)
   const formatter = createMemo(() => createSessionContextFormatter(language.intl()))
 
   const cost = createMemo(() => {
-    return usd().format(metrics().totalCost)
+    return usd().format(metrics().totalCost || info()?.cost || 0)
   })
 
   const counts = createMemo(() => {
@@ -240,12 +241,12 @@ export function SessionContextTab() {
     { label: "context.stats.limit", value: () => formatter().number(ctx()?.limit) },
     { label: "context.stats.currentContextTokens", value: () => formatter().number(ctx()?.total) },
     { label: "context.stats.usage", value: () => formatter().percent(ctx()?.usage) },
-    { label: "context.stats.inputTokens", value: () => formatter().number(ctx()?.input) },
-    { label: "context.stats.outputTokens", value: () => formatter().number(ctx()?.output) },
-    { label: "context.stats.reasoningTokens", value: () => formatter().number(ctx()?.reasoning) },
+    { label: "context.stats.inputTokens", value: () => formatter().number(tokens()?.input) },
+    { label: "context.stats.outputTokens", value: () => formatter().number(tokens()?.output) },
+    { label: "context.stats.reasoningTokens", value: () => formatter().number(tokens()?.reasoning) },
     {
       label: "context.stats.cacheTokens",
-      value: () => `${formatter().number(ctx()?.cacheRead)} / ${formatter().number(ctx()?.cacheWrite)}`,
+      value: () => `${formatter().number(tokens()?.cache.read)} / ${formatter().number(tokens()?.cache.write)}`,
     },
     { label: "context.stats.userMessages", value: () => counts().user.toLocaleString(language.intl()) },
     { label: "context.stats.assistantMessages", value: () => counts().assistant.toLocaleString(language.intl()) },

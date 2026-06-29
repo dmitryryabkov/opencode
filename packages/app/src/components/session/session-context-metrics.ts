@@ -143,21 +143,9 @@ const childTokens = (input: Input) => {
   })
 }
 
-const build = (messages: Message[] = [], providers: Provider[] = [], children?: Input): Metrics => {
-  const rootMessages = children?.sessionID
-    ? mergeMessages(children.histories?.[children.sessionID], children.messages?.[children.sessionID] ?? messages)
-    : messages
+const buildContext = (messages: Message[] = [], providers: Provider[] = []): Context | undefined => {
   const message = lastAssistantWithTokens(messages)
-  const subagents = childTokens(children ?? {})
-  const subagentTokens = subagents.reduce((sum, item) => sum + item.tokens, 0)
-  const subagentCost = childSessions(children ?? {}).reduce(
-    (sum, session) => sum + sessionCost(inputMessages(children, session.id)),
-    0,
-  )
-  const totalCost = sessionCost(rootMessages) + subagentCost
-  const totalExecutionMs = assistantExecutionMs(rootMessages)
-  const totalTokens = sessionTokens(rootMessages) + subagentTokens
-  if (!message) return { totalCost, context: undefined, subagents, subagentTokens, totalTokens, totalExecutionMs }
+  if (!message) return undefined
 
   const provider = providers.find((item) => item.id === message.providerID)
   const model = provider?.models[message.modelID]
@@ -165,29 +153,51 @@ const build = (messages: Message[] = [], providers: Provider[] = [], children?: 
   const total = tokenTotal(message)
 
   return {
-    totalCost,
+    message,
+    provider,
+    model,
+    providerLabel: provider?.name ?? message.providerID,
+    modelLabel: model?.name ?? message.modelID,
+    limit,
+    input: message.tokens.input,
+    output: message.tokens.output,
+    reasoning: message.tokens.reasoning,
+    cacheRead: message.tokens.cache.read,
+    cacheWrite: message.tokens.cache.write,
+    total,
+    usage: limit ? Math.round((total / limit) * 100) : null,
+  }
+}
+
+const build = (messages: Message[] = [], providers: Provider[] = [], children?: Input): Metrics => {
+  const rootMessages = children?.sessionID
+    ? mergeMessages(children.histories?.[children.sessionID], children.messages?.[children.sessionID] ?? messages)
+    : messages
+  const subagents = childTokens(children ?? {})
+  const subagentTokens = subagents.reduce((sum, item) => sum + item.tokens, 0)
+  const subagentCost = childSessions(children ?? {}).reduce(
+    (sum, session) => sum + sessionCost(inputMessages(children, session.id)),
+    0,
+  )
+  return {
+    totalCost: sessionCost(rootMessages) + subagentCost,
+    context: buildContext(messages, providers),
     subagents,
     subagentTokens,
-    totalTokens,
-    totalExecutionMs,
-    context: {
-      message,
-      provider,
-      model,
-      providerLabel: provider?.name ?? message.providerID,
-      modelLabel: model?.name ?? message.modelID,
-      limit,
-      input: message.tokens.input,
-      output: message.tokens.output,
-      reasoning: message.tokens.reasoning,
-      cacheRead: message.tokens.cache.read,
-      cacheWrite: message.tokens.cache.write,
-      total,
-      usage: limit ? Math.round((total / limit) * 100) : null,
-    },
+    totalTokens: sessionTokens(rootMessages) + subagentTokens,
+    totalExecutionMs: assistantExecutionMs(rootMessages),
   }
+}
+
+export function getSessionContext(messages: Message[] = [], providers: Provider[] = []) {
+  return buildContext(messages, providers)
 }
 
 export function getSessionContextMetrics(messages: Message[] = [], providers: Provider[] = [], children?: Input) {
   return build(messages, providers, children)
+}
+
+export function getSessionTokenTotal(tokens: Session["tokens"] | undefined) {
+  if (!tokens) return undefined
+  return tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write
 }

@@ -105,6 +105,7 @@ export async function handler(
     const sessionId = input.request.headers.get("x-opencode-session") ?? ""
     const requestId = input.request.headers.get("x-opencode-request") ?? ""
     const ocClient = input.request.headers.get("x-opencode-client") ?? ""
+    const projectId = input.request.headers.get("x-opencode-project") ?? ""
     const userAgent = input.request.headers.get("user-agent") ?? ""
     logger.metric({
       is_stream: isStream,
@@ -136,7 +137,7 @@ export async function handler(
     const providerBudgetTracker = createProviderBudgetTracker(
       modelInfo.providers.map((provider) => ({ ...zenData.providers[provider.id], ...provider })),
     )
-    const providerBudgetUsage = await providerBudgetTracker?.check()
+    const providerBudget = await providerBudgetTracker?.check()
 
     const retriableRequest = async (retry: RetryOptions = { excludeProviders: [], retryCount: 0 }) => {
       const providerInfo = selectProvider(
@@ -150,16 +151,13 @@ export async function handler(
         stickyProvider,
         modelTpmLimits,
         modelTpsLimits,
-        providerBudgetUsage,
+        providerBudget,
       )
       validateModelSettings(billingSource, authInfo)
       updateProviderKey(authInfo, providerInfo)
       logger.metric({
         provider: providerInfo.id,
         "provider.model": providerInfo.model,
-        ...(providerBudgetUsage?.[providerInfo.id]
-          ? { "provider.budget_usage": providerBudgetUsage?.[providerInfo.id] }
-          : {}),
       })
 
       const startTimestamp = Date.now()
@@ -196,8 +194,18 @@ export async function handler(
         headers: (() => {
           const headers = new Headers(input.request.headers)
           providerInfo.modifyHeaders(headers, providerInfo.apiKey, stickyId)
-          Object.entries(providerInfo.headerMappings ?? {}).forEach(([k, v]) => {
-            headers.set(k, headers.get(v)!)
+          Object.entries(providerInfo.headerModifier ?? {}).forEach(([k, v]) => {
+            if (v === "$ip") return headers.set(k, ip)
+            if (v === "$caller") return headers.set(k, stickyId)
+            if (v === "$session") return headers.set(k, sessionId)
+            if (v === "$model") return headers.set(k, model)
+            if (v === "$request") return headers.set(k, requestId)
+            if (v === "$project") return headers.set(k, projectId)
+            if (v === "$workspace") {
+              if (authInfo?.workspaceID) headers.set(k, authInfo.workspaceID)
+              return
+            }
+            headers.set(k, v)
           })
           headers.delete("host")
           headers.delete("content-length")
@@ -208,7 +216,20 @@ export async function handler(
           return headers
         })(),
         body: reqBody,
+        // Propagate caller disconnects to the upstream provider request so
+        // abandoned Console requests do not leave orphaned inference work open.
+        signal: input.request.signal,
       })
+
+      if (providerInfo.id.startsWith("console.")) {
+        const resEndpointId = res.headers.get("x-opencode-endpoint-id")
+        const resEndpointModelId = res.headers.get("x-opencode-upstream-model-id")
+        if (resEndpointId && resEndpointModelId)
+          logger.metric({
+            provider: resEndpointId,
+            "provider.model": resEndpointModelId,
+          })
+      }
 
       if (res.status !== 200) {
         logger.metric({
@@ -266,7 +287,7 @@ export async function handler(
         const costInfo = calculateCost(modelInfo, usageInfo)
         await trialLimiter?.track(usageInfo)
         await modelTpmLimiter?.track(providerInfo.id, providerInfo.model, usageInfo)
-        await providerBudgetTracker?.track(providerInfo.id, costInfo.totalCostInCent)
+        await providerBudgetTracker?.track(providerInfo.id, providerInfo.budgetPriority, costInfo.totalCostInCent)
         await trackUsage(sessionId, billingSource, authInfo, modelInfo, providerInfo, usageInfo, costInfo)
         await reload(billingSource, authInfo, costInfo)
         json.cost = calculateOccurredCost(billingSource, costInfo)
@@ -293,9 +314,10 @@ export async function handler(
     const streamConverter = createStreamPartConverter(providerInfo.format, opts.format)
     const usageParser = providerInfo.createUsageParser()
     const binaryDecoder = providerInfo.createBinaryStreamDecoder()
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
     const stream = new ReadableStream({
       start(c) {
-        const reader = res.body?.getReader()
+        reader = res.body?.getReader()
         const decoder = new TextDecoder()
         const encoder = new TextEncoder()
 
@@ -327,7 +349,11 @@ export async function handler(
                     timestampLastByte,
                     usageInfo,
                   )
-                  await providerBudgetTracker?.track(providerInfo.id, costInfo.totalCostInCent)
+                  await providerBudgetTracker?.track(
+                    providerInfo.id,
+                    providerInfo.budgetPriority,
+                    costInfo.totalCostInCent,
+                  )
                   await trackUsage(sessionId, billingSource, authInfo, modelInfo, providerInfo, usageInfo, costInfo)
                   await reload(billingSource, authInfo, costInfo)
                   const cost = calculateOccurredCost(billingSource, costInfo)
@@ -351,7 +377,7 @@ export async function handler(
               responseLength += value.length
               buffer += decoder.decode(value, { stream: true })
 
-              const parts = buffer.split(providerInfo.streamSeparator)
+              const parts = buffer.split(/\r\n\r\n|\n\n|\r\r/)
               buffer = parts.pop() ?? ""
 
               for (let part of parts) {
@@ -377,6 +403,11 @@ export async function handler(
 
         return pump()
       },
+      cancel() {
+        // When the downstream caller stops reading, release the upstream
+        // response body instead of keeping the provider/inference stream alive.
+        return reader?.cancel()
+      },
     })
     return new Response(stream, {
       status: resStatus,
@@ -384,6 +415,15 @@ export async function handler(
       headers: resHeaders,
     })
   } catch (error: any) {
+    // The caller disconnected before we finished. Because the outbound provider
+    // request shares input.request.signal, an aborted caller surfaces here as an
+    // AbortError. There is no client left to receive a body, so skip the error
+    // metric and 500 and return a quiet client-closed response.
+    if (input.request.signal.aborted || error?.name === "AbortError") {
+      logger.debug("REQUEST ABORTED BY CALLER")
+      return new Response(null, { status: 499 })
+    }
+
     logger.metric({
       "error.type": error.constructor.name,
       "error.message": error.message,
@@ -494,7 +534,12 @@ export async function handler(
     stickyProviderId: string | undefined,
     modelTpmLimits: Record<string, number> | undefined,
     modelTpsLimits: Record<string, { qualify: number; unqualify: number }> | undefined,
-    providerBudgetUsage: Record<string, number> | undefined,
+    providerBudget:
+      | {
+          qualify: (providerId: string, priority: number) => boolean
+          prefer: (providerId: string, priority: number) => boolean
+        }
+      | undefined,
   ) {
     const modelProvider = (() => {
       // Byok is top priority b/c if user set their own API key, we should use it
@@ -518,10 +563,9 @@ export async function handler(
           .filter((provider) => provider.weight !== 0)
           .filter((provider) => !retry.excludeProviders.includes(provider.id))
           .filter((provider) => {
-            if (provider.budgetMode !== "fill") return true
-            const budget = zenData.providers[provider.id]?.budget
-            if (budget === undefined) return false
-            return (providerBudgetUsage?.[provider.id] ?? 0) < centsToMicroCents(budget * 100)
+            if (provider.budgetPriority === undefined) return true
+            if (!providerBudget) return true
+            return providerBudget.qualify(provider.id, provider.budgetPriority)
           })
           .filter((provider) => {
             if (!provider.tpmLimit) return true
@@ -558,15 +602,19 @@ export async function handler(
         const stickProvider = allProviders.find((provider) => provider.id === stickyProviderId)
         if (!stickProvider) return provider
 
-        // stick provider exists + selected provider is API type => use sticky provider
-        if (!provider.tpsGoal) return stickProvider
+        const preferBudgetProvider =
+          provider.budgetPriority !== undefined && providerBudget?.prefer(provider.id, provider.budgetPriority)
 
-        // stick provier exists + selected provider is GPU type + GPU not idle => use selected provider
-        const tps = modelTpsLimits?.[`${provider.id}/${provider.model}/${provider.tpsGoal}`] ?? {
-          qualify: 0,
-          unqualify: 0,
-        }
-        if (tps.qualify <= tps.unqualify * 3) return stickProvider
+        const preferTpsProvider = (() => {
+          if (!provider.tpsGoal) return false
+          const tps = modelTpsLimits?.[`${provider.id}/${provider.model}/${provider.tpsGoal}`] ?? {
+            qualify: 0,
+            unqualify: 0,
+          }
+          return tps.qualify > tps.unqualify * 3
+        })()
+
+        if (!preferBudgetProvider && !preferTpsProvider) return stickProvider
 
         return provider
       }
@@ -694,6 +742,7 @@ export async function handler(
     logger.metric({
       api_key: data.apiKey,
       workspace: data.workspaceID,
+      user_id: data.user.id,
       ...(() => {
         if (data.billing.subscription)
           return {
