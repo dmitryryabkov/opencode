@@ -241,6 +241,35 @@ describe("getSessionContextMetrics", () => {
 })
 
 describe("getSessionContext", () => {
+  test("computes token totals and usage from latest assistant with tokens", () => {
+    const messages = [
+      user("u1"),
+      assistant("a1", { input: 600, output: 200, reasoning: 100, read: 50, write: 50 }, 0.5),
+      assistant("a2", { input: 300, output: 100, reasoning: 50, read: 25, write: 25 }, 1.25),
+    ]
+    const providers = [
+      {
+        id: "openai",
+        name: "OpenAI",
+        models: {
+          "gpt-4.1": {
+            name: "GPT-4.1",
+            limit: { context: 1000 },
+          },
+        },
+      },
+    ]
+
+    const ctx = getSessionContext(messages, providers)
+
+    expect(ctx?.message.id).toBe("a2")
+    expect(ctx?.total).toBe(500)
+    expect(ctx?.input).toBe(300)
+    expect(ctx?.usage).toBe(50)
+    expect(ctx?.providerLabel).toBe("OpenAI")
+    expect(ctx?.modelLabel).toBe("GPT-4.1")
+  })
+
   test("preserves fallback labels and null usage when model metadata is missing", () => {
     const messages = [assistant("a1", { input: 40, output: 10, reasoning: 0, read: 0, write: 0 }, 0.1, "p-1", "m-1")]
     const providers = [{ id: "p-1", models: {} }]
